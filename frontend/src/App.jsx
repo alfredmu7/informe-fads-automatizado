@@ -178,13 +178,13 @@ export default function App() {
 
       <main className="app-body">
         <div className="section-header">
-          <h2>Registro FADS (Honeywell / VeriFire)</h2>
+          <h2>Registro FADS</h2>
           <p>
             {loadingData
               ? 'Cargando base de datos...'
               : databaseError
                 ? 'No se pudo cargar la base de datos de dispositivos.'
-                : 'Ingrese o seleccione un ID para autocompletar D/TIVO, ubicación y tecnología.'}
+                : 'Ingrese ID del dispositivo y guarde el registro.'}
           </p>
         </div>
 
@@ -225,7 +225,6 @@ export default function App() {
               <input
                 type="text"
                 name="idDispositivo"
-                placeholder="Ej: P2L01D001"
                 value={formData.idDispositivo}
                 onChange={handleChange}
                 required
@@ -284,7 +283,6 @@ export default function App() {
             <input
               type="text"
               name="tecnico"
-              placeholder="Ej: ALFREDO MUÑOZ"
               value={formData.tecnico}
               onChange={handleChange}
               required
@@ -296,9 +294,8 @@ export default function App() {
           <div className="field-group">
             <label className="field-label">Estado del Dispositivo</label>
             <select name="estado" value={formData.estado} onChange={handleChange} className="form-input">
-              <option value="BUENO">BUENO</option>
+              <option value="BUENO">OPERATIVO</option>
               <option value="DEFECTUOSO">DEFECTUOSO</option>
-              <option value="CAMBIO">CAMBIO</option>
             </select>
           </div>
 
@@ -328,7 +325,7 @@ export default function App() {
         </form>
 
         <footer className="app-footer">
-          Johnson Controls • Sistema Automatizado FADS (VeriFire)
+          Johnson Controls • Sistema Automatizado FADS
         </footer>
       </main>
     </div>
