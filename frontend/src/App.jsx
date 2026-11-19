@@ -217,11 +217,10 @@ export default function App() {
               type="button"
               onClick={closeTechnicianSession}
               disabled={loading}
-              title="Cerrar sesión del técnico"
+              title="Cambiar de técnico"
               style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 8px', border: '1px solid #fecaca', borderRadius: '8px', background: '#fff', color: '#b91c1c', font: 'inherit', cursor: loading ? 'not-allowed' : 'pointer' }}
             >
               <LogOut size={14} />
-              <span>Cerrar sesión</span>
             </button>
           </div>
         </div>
