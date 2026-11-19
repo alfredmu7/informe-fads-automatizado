@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import CameraCapture from './components/CameraCapture';
-import { Send, CheckCircle2, AlertCircle, Building2, Search, MapPin, Cpu } from 'lucide-react';
+import TechnicianSetup from './components/TechnicianSetup';
+import { Send, CheckCircle2, AlertCircle, Building2, Search, MapPin, Cpu, UserRound, LogOut } from 'lucide-react';
 
 const normalizeDeviceId = (id) => String(id ?? '')
   .trim()
@@ -11,10 +12,10 @@ export default function App() {
   const [formData, setFormData] = useState({
     idDispositivo: '',
     tipoHoja: 'DISPOSITIVOS',
-    tecnico: '',
     estado: 'BUENO',
     observacion: ''
   });
+  const [tecnico, setTecnico] = useState('');
   
   // Base de datos en memoria (cargada desde el JSON)
   const [devicesDatabase, setDevicesDatabase] = useState([]);
@@ -108,17 +109,36 @@ export default function App() {
     setDispositivoEncontrado(device);
   };
 
+  const closeTechnicianSession = () => {
+    if (loading) return;
+
+    const hasPendingChanges = Boolean(
+      formData.idDispositivo
+      || formData.observacion
+      || formData.tipoHoja !== 'DISPOSITIVOS'
+      || formData.estado !== 'BUENO'
+      || fotoAntes
+      || fotoDespues
+    );
+    if (hasPendingChanges && !window.confirm('Se descartará el registro que no has guardado. ¿Quieres cerrar la sesión?')) {
+      return;
+    }
+
+    setTecnico('');
+    setFormData({ idDispositivo: '', tipoHoja: 'DISPOSITIVOS', estado: 'BUENO', observacion: '' });
+    setDispositivoEncontrado(null);
+    setFotoAntes(null);
+    setFotoDespues(null);
+    setCaptureSession((session) => session + 1);
+    setMensaje(null);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.idDispositivo) {
       alert('Por favor digite el ID del dispositivo.');
       return;
     }
-    if (!formData.tecnico) {
-      alert('Por favor ingrese el nombre del técnico.');
-      return;
-    }
-
     setLoading(true);
     setMensaje(null);
 
@@ -128,7 +148,7 @@ export default function App() {
       const dataToSend = new FormData();
       dataToSend.append('idDispositivo', dispositivoEncontrado?.ID || formData.idDispositivo);
       dataToSend.append('tipoHoja', formData.tipoHoja);
-      dataToSend.append('tecnico', formData.tecnico);
+      dataToSend.append('tecnico', tecnico);
       dataToSend.append('estado', formData.estado);
       dataToSend.append('observacion', formData.observacion);
       
@@ -147,7 +167,7 @@ export default function App() {
           ? 'DISPOSITIVOS CONFINADOS'
           : 'DISPOSITIVOS';
         setMensaje({ type: 'success', text: `¡Registro guardado en la pestaña ${sheetName} exitosamente!` });
-        setFormData({ idDispositivo: '', tipoHoja: 'DISPOSITIVOS', tecnico: '', estado: 'BUENO', observacion: '' });
+        setFormData({ idDispositivo: '', tipoHoja: 'DISPOSITIVOS', estado: 'BUENO', observacion: '' });
         setDispositivoEncontrado(null);
         setFotoAntes(null);
         setFotoDespues(null);
@@ -177,6 +197,8 @@ export default function App() {
       </header>
 
       <main className="app-body">
+        {tecnico ? (
+          <>
         <div className="section-header">
           <h2>Registro FADS</h2>
           <p>
@@ -186,6 +208,22 @@ export default function App() {
                 ? 'No se pudo cargar la base de datos de dispositivos.'
                 : 'Ingrese ID del dispositivo y guarde el registro.'}
           </p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginTop: '10px', color: '#334155', fontSize: '13px' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <UserRound size={15} />
+              <span><strong>Técnico:</strong> {tecnico}</span>
+            </span>
+            <button
+              type="button"
+              onClick={closeTechnicianSession}
+              disabled={loading}
+              title="Cerrar sesión del técnico"
+              style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 8px', border: '1px solid #fecaca', borderRadius: '8px', background: '#fff', color: '#b91c1c', font: 'inherit', cursor: loading ? 'not-allowed' : 'pointer' }}
+            >
+              <LogOut size={14} />
+              <span>Cerrar sesión</span>
+            </button>
+          </div>
         </div>
 
         {mensaje && (
@@ -277,19 +315,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Campo Técnico Responsable */}
-          <div className="field-group">
-            <label className="field-label">Técnico Responsable</label>
-            <input
-              type="text"
-              name="tecnico"
-              value={formData.tecnico}
-              onChange={handleChange}
-              required
-              className="form-input uppercase-input"
-            />
-          </div>
-
           {/* Campo Estado */}
           <div className="field-group">
             <label className="field-label">Estado del Dispositivo</label>
@@ -323,10 +348,11 @@ export default function App() {
           </button>
 
         </form>
-
-        <footer className="app-footer">
-          Johnson Controls • Sistema Automatizado FADS
-        </footer>
+        </>
+        ) : (
+        <TechnicianSetup onConfirm={setTecnico} />
+        )}
+        <footer className="app-footer">Johnson Controls • Sistema Automatizado FADS</footer>
       </main>
     </div>
   );
