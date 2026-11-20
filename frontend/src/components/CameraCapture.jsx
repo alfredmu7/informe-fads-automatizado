@@ -27,8 +27,8 @@ export default function CameraCapture({ onCapture }) {
         setCameraActive(false);
       }
     } catch (err) {
-      console.error("Error al acceder a la cámara:", err);
-      alert("No se pudo acceder a la cámara.");
+      console.error('Error al acceder a la cámara:', err);
+      alert('No se pudo acceder a la cámara.');
       setCameraActive(false);
     }
   };
@@ -43,9 +43,9 @@ export default function CameraCapture({ onCapture }) {
     const height = videoRef.current.videoHeight;
     canvasRef.current.width = width;
     canvasRef.current.height = height;
-    const ctx = canvasRef.current.getContext('2d');
-    ctx.drawImage(videoRef.current, 0, 0, width, height);
-    
+    const context = canvasRef.current.getContext('2d');
+    context.drawImage(videoRef.current, 0, 0, width, height);
+
     canvasRef.current.toBlob((blob) => {
       if (!blob) {
         alert('No se pudo capturar la imagen. Intente de nuevo.');

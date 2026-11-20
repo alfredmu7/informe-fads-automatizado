@@ -1,0 +1,8 @@
+{
+  "scripts": {
+    "build": "npm --prefix frontend run build"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  }
+}

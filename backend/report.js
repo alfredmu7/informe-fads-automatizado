@@ -1,5 +1,3 @@
-const XLSX = require('xlsx');
-
 const HEADER_ALIASES = {
   item: ['ITEM'],
   id: ['ID'],
@@ -13,9 +11,81 @@ const HEADER_ALIASES = {
   observation: ['OBSERVACION', 'OBSERVACIONES'],
   photoBefore: ['FOTO ANTES'],
   photoAfter: ['FOTO DESPUES'],
+  selectedType: ['TIPO SELECCIONADO'],
+  otherType: ['OTRO TIPO'],
+  aroProtector: ['ARO PROTECTOR'],
+  marquilla: ['MARQUILLA'],
+  cupulaGoodState: ['CUPULA BUEN ESTADO'],
+  cupulaBadState: ['CUPULA MAL ESTADO'],
+  tapaGoodState: ['TAPA BUEN ESTADO'],
+  carcasaGoodState: ['CARCASA BUEN ESTADO'],
+  equipoGoodState: ['EQUIPO BUEN ESTADO'],
 };
 
-const REQUIRED_REPORT_FIELDS = ['id', 'deviceType', 'location', 'technology', 'photoBefore', 'photoAfter'];
+const REQUIRED_REPORT_FIELDS = [
+  'id',
+  'deviceType',
+  'location',
+  'technology',
+  'photoBefore',
+  'photoAfter',
+  'selectedType',
+  'otherType',
+  'aroProtector',
+  'marquilla',
+  'cupulaGoodState',
+  'cupulaBadState',
+  'tapaGoodState',
+  'carcasaGoodState',
+  'equipoGoodState',
+];
+
+const CHECKLIST_ITEMS_BY_TYPE = {
+  SH: ['aro-protector', 'marquilla'],
+  DT: ['aro-protector', 'marquilla'],
+  STB: ['equipo-buen-estado', 'marquilla'],
+  EM: ['cupula-buen-estado', 'cupula-mal-estado', 'marquilla'],
+  MM: ['tapa-buen-estado', 'marquilla'],
+  BD: ['carcasa-buen-estado', 'marquilla'],
+  FTE: ['equipo-buen-estado', 'marquilla'],
+  PANEL: ['equipo-buen-estado', 'marquilla'],
+  AMPLIFICADOR: ['equipo-buen-estado', 'marquilla'],
+  OTRO: [],
+};
+
+const CHECKLIST_COLUMN_BY_ITEM = {
+  'aro-protector': 'aroProtector',
+  marquilla: 'marquilla',
+  'cupula-buen-estado': 'cupulaGoodState',
+  'cupula-mal-estado': 'cupulaBadState',
+  'tapa-buen-estado': 'tapaGoodState',
+  'carcasa-buen-estado': 'carcasaGoodState',
+  'equipo-buen-estado': 'equipoGoodState',
+};
+
+const COLUMN_MIN_WIDTHS = {
+  item: 10,
+  id: 18,
+  deviceType: 15,
+  panel: 18,
+  location: 38,
+  technology: 18,
+  date: 15,
+  technician: 28,
+  state: 18,
+  observation: 35,
+  photoBefore: 20,
+  photoAfter: 20,
+  selectedType: 20,
+  otherType: 24,
+  aroProtector: 18,
+  marquilla: 16,
+  cupulaGoodState: 22,
+  cupulaBadState: 22,
+  tapaGoodState: 20,
+  carcasaGoodState: 22,
+  equipoGoodState: 22,
+};
 
 function normalizeDeviceId(id) {
   return String(id ?? '')
@@ -57,25 +127,38 @@ function normalizeHeader(value) {
     .toUpperCase();
 }
 
-function findReportColumns(worksheet) {
-  const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
-  const lastHeaderRow = Math.min(range.e.r, range.s.r + 10);
+function getCellText(cell) {
+  const val = cell?.value;
+  if (val == null) return '';
+  if (typeof val === 'object') {
+    if (val.text) return String(val.text);
+    if (Array.isArray(val.richText)) return val.richText.map((t) => t.text).join('');
+    if (val.result !== undefined) return String(val.result);
+  }
+  return String(val);
+}
 
-  for (let row = range.s.r; row <= lastHeaderRow; row += 1) {
+// ExcelJS usa índices base 1 para filas y columnas
+function findReportColumns(worksheet) {
+  const maxRowToScan = Math.min(Math.max(worksheet.rowCount, 1), 15);
+  const maxColToScan = Math.max(worksheet.columnCount, 20);
+
+  for (let row = 1; row <= maxRowToScan; row += 1) {
+    const currentRow = worksheet.getRow(row);
     const headerCells = [];
-    for (let column = range.s.c; column <= range.e.c; column += 1) {
-      const cell = worksheet[XLSX.utils.encode_cell({ r: row, c: column })];
-      headerCells.push(normalizeHeader(cell?.v));
+
+    for (let col = 1; col <= maxColToScan; col += 1) {
+      headerCells.push(normalizeHeader(getCellText(currentRow.getCell(col))));
     }
 
     const columns = {};
     for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
       const normalizedAliases = aliases.map(normalizeHeader);
-      columns[field] = headerCells.findIndex((header) => normalizedAliases.includes(header));
-      if (columns[field] >= 0) columns[field] += range.s.c;
+      const foundIndex = headerCells.findIndex((header) => normalizedAliases.includes(header));
+      columns[field] = foundIndex >= 0 ? foundIndex + 1 : -1;
     }
 
-    if (columns.item >= 0) {
+    if (columns.item >= 1) {
       return { headerRow: row, columns };
     }
   }
@@ -84,27 +167,133 @@ function findReportColumns(worksheet) {
 }
 
 function assertRequiredReportColumns(columns) {
-  const missing = REQUIRED_REPORT_FIELDS.filter((field) => columns[field] < 0);
+  const missing = REQUIRED_REPORT_FIELDS.filter((field) => columns[field] < 1);
   if (missing.length) {
     const names = missing.map((field) => HEADER_ALIASES[field][0]).join(', ');
     throw new Error(`La hoja no tiene estas columnas requeridas: ${names}.`);
   }
 }
 
-function writeReportRow(worksheet, registration) {
+function buildInspectionValues(inspection) {
+  const type = String(inspection?.type ?? '').trim().toUpperCase();
+  const allowedItems = CHECKLIST_ITEMS_BY_TYPE[type];
+  if (!allowedItems) {
+    throw new Error('Datos de inspección inválidos: selecciona un tipo de dispositivo válido.');
+  }
+
+  const otherType = String(inspection?.otherType ?? '').trim();
+  if (type === 'OTRO' && !otherType) {
+    throw new Error('Datos de inspección inválidos: especifica el tipo de dispositivo seleccionado como Otro.');
+  }
+
+  const selectedItems = inspection?.selectedItems;
+  if (!Array.isArray(selectedItems) || selectedItems.some((item) => typeof item !== 'string')) {
+    throw new Error('Datos de inspección inválidos: la lista de casillas no tiene un formato válido.');
+  }
+
+  const selected = new Set(selectedItems);
+  if (
+    selected.size !== selectedItems.length
+    || selectedItems.some((item) => !allowedItems.includes(item))
+  ) {
+    throw new Error('Datos de inspección inválidos: hay casillas que no corresponden al tipo de dispositivo.');
+  }
+
+  const checklistValues = {};
+  for (const [item, column] of Object.entries(CHECKLIST_COLUMN_BY_ITEM)) {
+    checklistValues[column] = allowedItems.includes(item)
+      ? selected.has(item) ? 'SI' : 'NO'
+      : '';
+  }
+
+  return {
+    selectedType: type,
+    otherType: type === 'OTRO' ? otherType : '',
+    ...checklistValues,
+  };
+}
+
+function styleHeaderAndColumns(worksheet, headerRowNumber, columns) {
+  const headerRow = worksheet.getRow(headerRowNumber);
+  if (!headerRow.height || headerRow.height < 26) {
+    headerRow.height = 28;
+  }
+
+  for (const [field, colNumber] of Object.entries(columns)) {
+    if (colNumber < 1) continue;
+
+    // Asegurar ancho mínimo para que el texto no se desborde
+    const column = worksheet.getColumn(colNumber);
+    const minWidth = COLUMN_MIN_WIDTHS[field] || 18;
+    if (!column.width || column.width < minWidth) {
+      column.width = minWidth;
+    }
+
+    // Dar estilo al encabezado (conserva relleno si ya tiene uno puesto en Excel)
+    const headerCell = headerRow.getCell(colNumber);
+    if (!headerCell.fill || headerCell.fill.type === 'none') {
+      headerCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF1E3A8A' },
+      };
+      headerCell.font = {
+        ...(headerCell.font || {}),
+        bold: true,
+        color: { argb: 'FFFFFFFF' },
+      };
+    }
+
+    headerCell.alignment = {
+      ...(headerCell.alignment || {}),
+      horizontal: 'center',
+      vertical: 'middle',
+      wrapText: true,
+    };
+  }
+}
+
+function styleDataCell(cell, isLink = false) {
+  cell.alignment = {
+    horizontal: 'right',
+    vertical: 'middle',
+    wrapText: true,
+  };
+
+  cell.border = cell.border || {
+    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  };
+
+  if (isLink) {
+    cell.font = {
+      ...(cell.font || {}),
+      color: { argb: 'FF2563EB' },
+      underline: true,
+    };
+  }
+}
+
+async function writeReportRow(worksheet, registration) {
+  const inspectionValues = buildInspectionValues(registration.inspection);
   const { headerRow, columns } = findReportColumns(worksheet);
   assertRequiredReportColumns(columns);
+  styleHeaderAndColumns(worksheet, headerRow, columns);
 
-  let row = headerRow + 1;
-  while (worksheet[XLSX.utils.encode_cell({ r: row, c: columns.id })]?.v) {
-    row += 1;
+  let rowNumber = headerRow + 1;
+  while (getCellText(worksheet.getRow(rowNumber).getCell(columns.id)).trim() !== '') {
+    rowNumber += 1;
   }
 
   let nextItem = 1;
-  for (let currentRow = headerRow + 1; currentRow < row; currentRow += 1) {
-    const value = worksheet[XLSX.utils.encode_cell({ r: currentRow, c: columns.item })]?.v;
-    const numericItem = Number(value);
-    if (Number.isFinite(numericItem)) nextItem = Math.max(nextItem, numericItem + 1);
+  for (let currentRow = headerRow + 1; currentRow < rowNumber; currentRow += 1) {
+    const rawValue = getCellText(worksheet.getRow(currentRow).getCell(columns.item)).trim();
+    const numericItem = Number(rawValue);
+    if (Number.isFinite(numericItem) && numericItem > 0) {
+      nextItem = Math.max(nextItem, numericItem + 1);
+    }
   }
 
   const values = {
@@ -118,17 +307,19 @@ function writeReportRow(worksheet, registration) {
     technician: registration.technician,
     state: registration.state,
     observation: registration.observation,
+    ...inspectionValues,
   };
 
-  for (const [field, value] of Object.entries(values)) {
-    const column = columns[field];
-    if (column < 0) continue;
+  const targetRow = worksheet.getRow(rowNumber);
+  targetRow.height = 24;
 
-    const address = XLSX.utils.encode_cell({ r: row, c: column });
-    worksheet[address] = {
-      t: typeof value === 'number' ? 'n' : 's',
-      v: typeof value === 'number' ? value : String(value ?? ''),
-    };
+  for (const [field, value] of Object.entries(values)) {
+    const colNumber = columns[field];
+    if (colNumber < 1) continue;
+
+    const cell = targetRow.getCell(colNumber);
+    cell.value = typeof value === 'number' ? value : String(value ?? '');
+    styleDataCell(cell, false);
   }
 
   for (const [field, text] of [
@@ -136,27 +327,28 @@ function writeReportRow(worksheet, registration) {
     ['photoAfter', 'Ver Foto Después'],
   ]) {
     const target = registration.photoLinks[field];
-    if (!target) continue;
+    const colNumber = columns[field];
+    if (!target || colNumber < 1) continue;
 
-    const address = XLSX.utils.encode_cell({ r: row, c: columns[field] });
-    worksheet[address] = {
-      t: 's',
-      v: text,
-      l: { Target: target, Tooltip: text },
+    const cell = targetRow.getCell(colNumber);
+    cell.value = {
+      text,
+      hyperlink: target,
+      tooltip: text,
     };
+    styleDataCell(cell, true);
   }
 
-  const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
-  range.e.r = Math.max(range.e.r, row);
-  range.e.c = Math.max(range.e.c, columns.photoAfter);
-  worksheet['!ref'] = XLSX.utils.encode_range(range);
+  targetRow.commit();
 
-  return { row, item: nextItem, columns };
+  // Devuelve índice base 0 en `row` para mantener compatibilidad con `result.row + 1` en index_2.js
+  return { row: rowNumber - 1, item: nextItem, columns, inspectionValues };
 }
 
 module.exports = {
   assertRequiredReportColumns,
   buildPhotoFilename,
+  buildInspectionValues,
   findDeviceById,
   findReportColumns,
   normalizeDeviceId,
