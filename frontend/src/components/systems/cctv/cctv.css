@@ -1,0 +1,41 @@
+.cctv-camera-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.cctv-camera-details span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cctv-camera-details small {
+  color: #7d91a4;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.cctv-camera-details strong {
+  overflow-wrap: anywhere;
+  color: #34516e;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.cctv-state-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 480px) {
+  .cctv-state-grid,
+  .cctv-camera-details {
+    grid-template-columns: 1fr;
+  }
+}

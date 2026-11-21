@@ -101,6 +101,37 @@ function findDeviceById(devices, id) {
   return devices.find((device) => normalizeDeviceId(device.ID) === normalizedId) || null;
 }
 
+function resolveDeviceForRegistration(devices, id, manualData = {}) {
+  const knownDevice = findDeviceById(devices, id);
+  if (knownDevice) return knownDevice;
+
+  const deviceId = String(id ?? '').trim().toUpperCase();
+  const device = {
+    ID: deviceId,
+    DISPOSITIVO: String(manualData.dTivo ?? '').trim().toUpperCase(),
+    PANEL: '',
+    UBICACION: String(manualData.ubicacion ?? '').trim().toUpperCase(),
+    TIPO: String(manualData.tecnologia ?? '').trim().toUpperCase(),
+  };
+  const missingFields = [
+    ['D/TIVO', device.DISPOSITIVO],
+    ['ubicación', device.UBICACION],
+    ['tecnología', device.TIPO],
+  ].filter(([, value]) => !value);
+
+  if (!deviceId || missingFields.length) {
+    const requiredFields = missingFields.map(([label]) => label).join(', ');
+    const detail = deviceId
+      ? `Completa manualmente: ${requiredFields}.`
+      : 'Ingresa un ID de dispositivo.';
+    const error = new Error(`El dispositivo no aparece en la base de datos. ${detail}`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return device;
+}
+
 function buildPhotoFilename(fieldName, id, extension, uniqueSuffix = '') {
   const photoName = fieldName === 'fotoAntes'
     ? 'antes'
@@ -172,6 +203,19 @@ function assertRequiredReportColumns(columns) {
     const names = missing.map((field) => HEADER_ALIASES[field][0]).join(', ');
     throw new Error(`La hoja no tiene estas columnas requeridas: ${names}.`);
   }
+}
+
+function findReportRowMismatch(row, columns, expectedValues) {
+  return Object.entries(expectedValues).find(([field, expected]) => {
+    const column = columns[field];
+    if (!Number.isInteger(column) || column < 1) return false;
+
+    const actualValue = row?.getCell(column).value;
+    const actual = field === 'photoBefore' || field === 'photoAfter'
+      ? actualValue?.hyperlink ?? ''
+      : actualValue;
+    return String(actual ?? '') !== String(expected ?? '');
+  });
 }
 
 function buildInspectionValues(inspection) {
@@ -282,6 +326,18 @@ async function writeReportRow(worksheet, registration) {
   assertRequiredReportColumns(columns);
   styleHeaderAndColumns(worksheet, headerRow, columns);
 
+  const normalizedDeviceId = normalizeDeviceId(registration.device.ID);
+  for (let currentRow = headerRow + 1; currentRow <= worksheet.rowCount; currentRow += 1) {
+    const existingId = getCellText(worksheet.getRow(currentRow).getCell(columns.id)).trim();
+    if (existingId && normalizeDeviceId(existingId) === normalizedDeviceId) {
+      const error = new Error(
+        `El ID ${registration.device.ID} ya está registrado en la fila ${currentRow}.`,
+      );
+      error.statusCode = 409;
+      throw error;
+    }
+  }
+
   let rowNumber = headerRow + 1;
   while (getCellText(worksheet.getRow(rowNumber).getCell(columns.id)).trim() !== '') {
     rowNumber += 1;
@@ -349,8 +405,10 @@ module.exports = {
   assertRequiredReportColumns,
   buildPhotoFilename,
   buildInspectionValues,
+  findReportRowMismatch,
   findDeviceById,
   findReportColumns,
   normalizeDeviceId,
+  resolveDeviceForRegistration,
   writeReportRow,
 };

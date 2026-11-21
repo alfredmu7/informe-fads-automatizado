@@ -7,9 +7,12 @@ const test = require('node:test');
 const {
   buildInspectionValues,
   buildPhotoFilename,
+  findReportRowMismatch,
   findDeviceById,
+  resolveDeviceForRegistration,
   writeReportRow,
 } = require('./report');
+const createReportWriteQueue = require('./report-write-queue');
 
 const HEADERS = [
   'ITEM',
@@ -65,11 +68,61 @@ function createRegistration(overrides = {}) {
   };
 }
 
+test('serializes report writes and continues after a failed write', async () => {
+  const serializeReportWrite = createReportWriteQueue();
+  const events = [];
+  let activeWrites = 0;
+  let maximumActiveWrites = 0;
+
+  const write = (name) => serializeReportWrite(async () => {
+    activeWrites += 1;
+    maximumActiveWrites = Math.max(maximumActiveWrites, activeWrites);
+    events.push(`${name}:start`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    events.push(`${name}:end`);
+    activeWrites -= 1;
+  });
+
+  await Promise.all([write('first'), write('second')]);
+  assert.equal(maximumActiveWrites, 1);
+  assert.deepEqual(events, ['first:start', 'first:end', 'second:start', 'second:end']);
+
+  await assert.rejects(
+    serializeReportWrite(async () => {
+      throw new Error('test write failure');
+    }),
+    /test write failure/,
+  );
+  await serializeReportWrite(async () => events.push('after-failure'));
+  assert.equal(events[events.length - 1], 'after-failure');
+});
+
 test('finds a database record using the same normalized device ID as the interface', () => {
   const device = { ID: 'P2L01D001', UBICACION: 'BANO HOMBRES' };
 
   assert.equal(findDeviceById([device], 'p2l01d0001'), device);
   assert.equal(findDeviceById([device], 'unknown'), null);
+});
+
+test('resolves unknown IDs from manually entered device details', () => {
+  const manualDevice = resolveDeviceForRegistration([], ' manual-001 ', {
+    dTivo: 'MANUAL STATION',
+    ubicacion: 'SUB ESTACION',
+    tecnologia: 'PHOTO',
+  });
+
+  assert.deepEqual(manualDevice, {
+    ID: 'MANUAL-001',
+    DISPOSITIVO: 'MANUAL STATION',
+    PANEL: '',
+    UBICACION: 'SUB ESTACION',
+    TIPO: 'PHOTO',
+  });
+
+  assert.throws(
+    () => resolveDeviceForRegistration([], 'MANUAL-002', { dTivo: 'SH' }),
+    (error) => error.statusCode === 400 && /ubicación, tecnología/.test(error.message),
+  );
 });
 
 test('resolves P7L05D014 to the database location', () => {
@@ -163,6 +216,35 @@ test('writes existing report data and selected checklist values under their matc
   assert.equal(row.getCell(20).value, '');
 });
 
+test('rejects duplicate device IDs already present in the report', async () => {
+  const { worksheet } = createReportSheet();
+  await writeReportRow(worksheet, createRegistration());
+
+  await assert.rejects(
+    () => writeReportRow(worksheet, createRegistration({
+      device: { ...createRegistration().device, ID: 'p2l01d0001' },
+    })),
+    (error) => error.statusCode === 409 && /ya está registrado en la fila 3/.test(error.message),
+  );
+  assert.equal(worksheet.getRow(4).getCell(2).value, null);
+});
+
+test('writes manually supplied metadata for a device not found in the database', async () => {
+  const { worksheet } = createReportSheet();
+  const device = resolveDeviceForRegistration([], 'MANUAL-001', {
+    dTivo: 'MANUAL STATION',
+    ubicacion: 'SUB ESTACION',
+    tecnologia: 'PHOTO',
+  });
+
+  await writeReportRow(worksheet, createRegistration({ device }));
+
+  assert.equal(worksheet.getRow(3).getCell(2).value, 'MANUAL-001');
+  assert.equal(worksheet.getRow(3).getCell(3).value, 'MANUAL STATION');
+  assert.equal(worksheet.getRow(3).getCell(4).value, 'SUB ESTACION');
+  assert.equal(worksheet.getRow(3).getCell(5).value, 'PHOTO');
+});
+
 test('appends multiple device rows across separate workbook saves', async () => {
   const filePath = path.join(os.tmpdir(), `fads-rows-${process.pid}-${Date.now()}.xlsx`);
   const { workbook, worksheet } = createReportSheet();
@@ -213,6 +295,24 @@ test('requires the complete report and inspection header set', async () => {
     () => writeReportRow(worksheet, createRegistration()),
     /TIPO SELECCIONADO, OTRO TIPO, ARO PROTECTOR, MARQUILLA/,
   );
+});
+
+test('skips missing optional columns while verifying saved fields', () => {
+  const row = {
+    getCell(column) {
+      assert.equal(column, 2);
+      return { value: 'P2L01D001' };
+    },
+  };
+
+  assert.equal(findReportRowMismatch(row, { id: 2, panel: -1 }, {
+    id: 'P2L01D001',
+    panel: 'PANEL 1',
+  }), undefined);
+  assert.deepEqual(findReportRowMismatch(row, { id: 2, panel: -1 }, {
+    id: 'P2L01D002',
+    panel: 'PANEL 1',
+  }), ['id', 'P2L01D002']);
 });
 
 test('preserves public photo URLs when the workbook is saved', async () => {

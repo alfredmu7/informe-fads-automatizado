@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import CameraCapture from './components/CameraCapture';
 import TechnicianSetup from './components/TechnicianSetup';
+import CctvForm from './components/systems/CctvForm';
+import SacsForm from './components/systems/SacsForm';
 import {
   AlertCircle,
   ArrowLeft,
@@ -75,6 +77,9 @@ const STEPS = [
 
 const createInitialFormData = () => ({
   idDispositivo: '',
+  dTivo: '',
+  ubicacion: '',
+  tecnologia: '',
   estado: 'BUENO',
   tipoEquipo: '',
   otroTipo: '',
@@ -99,16 +104,17 @@ const resolveRegisterUrl = () => {
 export default function App() {
   const [formData, setFormData] = useState(createInitialFormData);
   const [tecnico, setTecnico] = useState('');
+  const [selectedSystem, setSelectedSystem] = useState('');
   const [devicesDatabase, setDevicesDatabase] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
   const [databaseError, setDatabaseError] = useState('');
-  const [dispositivoEncontrado, setDispositivoEncontrado] = useState(null);
   const [fotoAntes, setFotoAntes] = useState(null);
   const [fotoDespues, setFotoDespues] = useState(null);
   const [captureSession, setCaptureSession] = useState(0);
   const [currentStep, setCurrentStep] = useState(0);
   const [checkedItems, setCheckedItems] = useState([]);
   const [saving, setSaving] = useState(false);
+  const savingRequestRef = useRef(false);
   const [mensaje, setMensaje] = useState(null);
 
   const devicesById = useMemo(() => {
@@ -119,6 +125,7 @@ export default function App() {
     });
     return index;
   }, [devicesDatabase]);
+  const dispositivoEncontrado = devicesById.get(normalizeDeviceId(formData.idDispositivo)) || null;
 
   const matchingDevices = useMemo(() => {
     const rawQuery = String(formData.idDispositivo ?? '').trim().toUpperCase();
@@ -135,8 +142,14 @@ export default function App() {
   }, [devicesById, dispositivoEncontrado, formData.idDispositivo]);
 
   const checklist = CHECKLIST_BY_TYPE[formData.tipoEquipo] || [];
+  const manualDeviceDetailsComplete = Boolean(
+    formData.dTivo.trim()
+    && formData.ubicacion.trim()
+    && formData.tecnologia.trim(),
+  );
   const isFirstStepValid = Boolean(
     formData.idDispositivo.trim()
+    && (dispositivoEncontrado || manualDeviceDetailsComplete)
     && formData.tipoEquipo
     && (!isOtherDeviceType(formData.tipoEquipo) || formData.otroTipo.trim()),
   );
@@ -172,25 +185,28 @@ export default function App() {
   const handleChange = (event) => {
     const { name, value } = event.target;
     const nextValue = name === 'idDispositivo' ? value.toUpperCase() : value;
-    setFormData((previous) => ({ ...previous, [name]: nextValue }));
-
-    if (name === 'idDispositivo') {
-      const normalizedId = normalizeDeviceId(nextValue);
-      setDispositivoEncontrado(normalizedId ? devicesById.get(normalizedId) || null : null);
-    }
+    setFormData((previous) => ({
+      ...previous,
+      [name]: nextValue,
+      ...(name === 'idDispositivo' ? { dTivo: '', ubicacion: '', tecnologia: '' } : {}),
+    }));
 
     if (name === 'tipoEquipo') setCheckedItems([]);
     setMensaje(null);
   };
 
   const selectDevice = (device) => {
-    setFormData((previous) => ({ ...previous, idDispositivo: normalizeDeviceId(device.ID) }));
-    setDispositivoEncontrado(device);
+    setFormData((previous) => ({
+      ...previous,
+      idDispositivo: normalizeDeviceId(device.ID),
+      dTivo: '',
+      ubicacion: '',
+      tecnologia: '',
+    }));
   };
 
   const clearRegistration = () => {
     setFormData(createInitialFormData());
-    setDispositivoEncontrado(null);
     setFotoAntes(null);
     setFotoDespues(null);
     setCheckedItems([]);
@@ -217,6 +233,12 @@ export default function App() {
 
     clearRegistration();
     setTecnico('');
+    setSelectedSystem('');
+  };
+
+  const handleConfirmAccess = (technicianName, system) => {
+    setTecnico(technicianName);
+    setSelectedSystem(system);
   };
 
   const toggleChecklistItem = (itemId) => {
@@ -230,7 +252,7 @@ export default function App() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (currentStep !== STEPS.length - 1 || saving) return;
+    if (currentStep !== STEPS.length - 1 || saving || savingRequestRef.current) return;
 
     if (!isFirstStepValid) {
       setCurrentStep(0);
@@ -238,6 +260,7 @@ export default function App() {
       return;
     }
 
+    savingRequestRef.current = true;
     setSaving(true);
     setMensaje(null);
 
@@ -245,6 +268,9 @@ export default function App() {
       const backendUrl = resolveRegisterUrl();
       const dataToSend = new FormData();
       dataToSend.append('idDispositivo', dispositivoEncontrado?.ID || formData.idDispositivo);
+      dataToSend.append('dTivo', formData.dTivo);
+      dataToSend.append('ubicacion', formData.ubicacion);
+      dataToSend.append('tecnologia', formData.tecnologia);
       dataToSend.append('tipoHoja', 'DISPOSITIVOS');
       dataToSend.append('tecnico', tecnico);
       dataToSend.append('estado', formData.estado);
@@ -288,7 +314,6 @@ export default function App() {
         text: `Registro guardado en DISPOSITIVOS, fila ${savedRow} (ítem ${result.item}).`,
       });
       setFormData(createInitialFormData());
-      setDispositivoEncontrado(null);
       setFotoAntes(null);
       setFotoDespues(null);
       setCheckedItems([]);
@@ -301,6 +326,7 @@ export default function App() {
         text: error.message || 'No se pudo conectar con el servidor. Verifica que el backend y ngrok estén activos.',
       });
     } finally {
+      savingRequestRef.current = false;
       setSaving(false);
     }
   };
@@ -324,7 +350,9 @@ export default function App() {
             <div className="brand-logo" aria-hidden="true">JC</div>
             <div>
               <span className="brand-title">Johnson Controls</span>
-              <span className="brand-caption">Inspección de dispositivos FADS</span>
+              <span className="brand-caption">
+                {selectedSystem ? `Sistema ${selectedSystem}` : 'Acceso a sistemas de inspección'}
+              </span>
             </div>
           </div>
           <div className="location-badge">
@@ -336,23 +364,27 @@ export default function App() {
         <div className="app-body">
           {tecnico ? (
             <>
-              <div className="session-bar">
-                <span className="session-user">
-                  <UserRound size={16} aria-hidden="true" />
-                  <span><strong>Técnico</strong> {tecnico}</span>
-                </span>
-                <button
-                  type="button"
-                  className="session-exit"
-                  onClick={closeTechnicianSession}
-                  disabled={saving}
-                  aria-label="Cambiar de técnico"
-                  title="Cambiar de técnico"
-                >
-                  <LogOut size={16} aria-hidden="true" />
-                </button>
-              </div>
+              {selectedSystem !== 'CCTV' && (
+                <div className="session-bar">
+                  <span className="session-user">
+                    <UserRound size={16} aria-hidden="true" />
+                    <span><strong>Técnico</strong> {tecnico}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="session-exit"
+                    onClick={closeTechnicianSession}
+                    disabled={saving}
+                    aria-label="Cambiar de técnico"
+                    title="Cambiar de técnico"
+                  >
+                    <LogOut size={16} aria-hidden="true" />
+                  </button>
+                </div>
+              )}
 
+              {selectedSystem === 'FADS' ? (
+                <>
               <section className="intro">
                 <span className="eyebrow">REGISTRO DE MANTENIMIENTO</span>
                 <h1>Inspección FADS</h1>
@@ -465,8 +497,58 @@ export default function App() {
                             </div>
                           </>
                         ) : (
-                          <span><AlertCircle size={16} aria-hidden="true" />ID aún no validado en la base de datos.</span>
+                          <span><AlertCircle size={16} aria-hidden="true" />ID no encontrado. Completa los datos manualmente.</span>
                         )}
+                      </div>
+                    )}
+
+                    {formData.idDispositivo.trim() && !dispositivoEncontrado && (
+                      <div className="manual-device-fields">
+                        <div className="manual-device-fields-heading">
+                          <strong>Datos del dispositivo</strong>
+                          <span>El ID no está en la base. Completa estos campos para registrarlo.</span>
+                        </div>
+                        <div className="manual-device-fields-grid">
+                          <div className="field-group">
+                            <label className="field-label" htmlFor="manual-dtivo">D/TIVO</label>
+                            <input
+                              id="manual-dtivo"
+                              name="dTivo"
+                              type="text"
+                              value={formData.dTivo}
+                              onChange={handleChange}
+                              placeholder="Ej. SH"
+                              className="form-input uppercase-input"
+                              required
+                            />
+                          </div>
+                          <div className="field-group">
+                            <label className="field-label" htmlFor="manual-ubicacion">Ubicación</label>
+                            <input
+                              id="manual-ubicacion"
+                              name="ubicacion"
+                              type="text"
+                              value={formData.ubicacion}
+                              onChange={handleChange}
+                              placeholder="Ubicación del dispositivo"
+                              className="form-input uppercase-input"
+                              required
+                            />
+                          </div>
+                          <div className="field-group">
+                            <label className="field-label" htmlFor="manual-tecnologia">Tecnología</label>
+                            <input
+                              id="manual-tecnologia"
+                              name="tecnologia"
+                              type="text"
+                              value={formData.tecnologia}
+                              onChange={handleChange}
+                              placeholder="Ej. PHOTO"
+                              className="form-input uppercase-input"
+                              required
+                            />
+                          </div>
+                        </div>
                       </div>
                     )}
 
@@ -662,9 +744,15 @@ export default function App() {
                 <span className="footer-dot" />
                 <span>Sistema FADS</span>
               </footer>
+                </>
+              ) : selectedSystem === 'CCTV' ? (
+                <CctvForm onBack={closeTechnicianSession} technician={tecnico} />
+              ) : (
+                <SacsForm onBack={closeTechnicianSession} />
+              )}
             </>
           ) : (
-            <TechnicianSetup onConfirm={setTecnico} />
+            <TechnicianSetup onConfirm={handleConfirmAccess} />
           )}
         </div>
       </main>
