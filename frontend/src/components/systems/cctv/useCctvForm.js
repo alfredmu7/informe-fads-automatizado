@@ -4,6 +4,7 @@ import {
   createInitialCctvFormData,
 } from './cctvConstants';
 import { getCctvEndpoint, readJsonResponse } from './cctvApi';
+import { enqueueReport } from '../../../services/reportOutbox';
 
 const normalizeCameraId = (id) => String(id ?? '').trim().toUpperCase();
 
@@ -106,40 +107,27 @@ export default function useCctvForm(technician) {
       setMessage({ type: 'error', text: 'Selecciona un ID de la base de cámaras CCTV antes de guardar.' });
       return;
     }
-
     savingRequestRef.current = true;
     setSaving(true);
     setMessage(null);
 
     try {
-      const dataToSend = new FormData();
-      dataToSend.append('idDispositivo', selectedCamera.ID);
-      dataToSend.append('tecnico', technician);
-      dataToSend.append('estadoInicial', formData.estadoInicial);
-      dataToSend.append('estadoFinal', formData.estadoFinal);
-      dataToSend.append('observacion', formData.observacion);
-      dataToSend.append('checklistItems', JSON.stringify(checkedItems));
-      if (fotoAntes) dataToSend.append('fotoAntes', fotoAntes);
-      if (fotoDespues) dataToSend.append('fotoDespues', fotoDespues);
-
-      const response = await fetch(getCctvEndpoint('registrar'), {
-        method: 'POST',
-        headers: { 'ngrok-skip-browser-warning': 'true' },
-        body: dataToSend,
+      const queuedReport = await enqueueReport({
+        system: 'CCTV',
+        fields: {
+          idDispositivo: selectedCamera.ID,
+          tecnico: technician,
+          estadoInicial: formData.estadoInicial,
+          estadoFinal: formData.estadoFinal,
+          observacion: formData.observacion,
+          instalacionNueva: String(formData.instalacionNueva),
+          checklistItems: JSON.stringify(checkedItems),
+        },
+        photos: { fotoAntes, fotoDespues },
       });
-      const result = await readJsonResponse(response);
-      if (!response.ok || result?.success !== true || result?.inspectionSaved !== true) {
-        throw new Error(result?.error || `Error HTTP ${response.status} al guardar el registro CCTV.`);
-      }
-
-      const savedRow = Number(result.fila);
-      if (!Number.isInteger(savedRow) || savedRow < 1) {
-        throw new Error('El servidor no confirmó la fila escrita en el informe CCTV.');
-      }
-
       setMessage({
         type: 'info',
-        text: `Registro CCTV guardado en la fila ${savedRow} (ítem ${result.item}).`,
+        text: `Registro y fotos guardados en la cola local. Solicitud ${queuedReport.requestId}.`,
       });
       resetForm();
     } catch (error) {

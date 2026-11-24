@@ -53,6 +53,7 @@ export default function SacsForm({ onBack, technician }) {
     || formData.idDispositivo
     || formData.general
     || formData.observacion
+    || formData.instalacionNueva
     || checklistChanged
     || fotoAntes
     || fotoDespues

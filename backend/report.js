@@ -8,6 +8,7 @@ const HEADER_ALIASES = {
   date: ['FECHA'],
   technician: ['TECNICO RESPONSABLE'],
   state: ['ESTADO FINAL'],
+  installationDate: ['FECHA DE INSTALACION'],
   observation: ['OBSERVACION', 'OBSERVACIONES'],
   photoBefore: ['FOTO ANTES'],
   photoAfter: ['FOTO DESPUES'],
@@ -27,6 +28,7 @@ const REQUIRED_REPORT_FIELDS = [
   'deviceType',
   'location',
   'technology',
+  'installationDate',
   'photoBefore',
   'photoAfter',
   'selectedType',
@@ -73,6 +75,7 @@ const COLUMN_MIN_WIDTHS = {
   date: 15,
   technician: 28,
   state: 18,
+  installationDate: 22,
   observation: 35,
   photoBefore: 20,
   photoAfter: 20,
@@ -362,6 +365,7 @@ async function writeReportRow(worksheet, registration) {
     date: registration.date,
     technician: registration.technician,
     state: registration.state,
+    installationDate: registration.installationDate,
     observation: registration.observation,
     ...inspectionValues,
   };
@@ -374,7 +378,10 @@ async function writeReportRow(worksheet, registration) {
     if (colNumber < 1) continue;
 
     const cell = targetRow.getCell(colNumber);
-    cell.value = typeof value === 'number' ? value : String(value ?? '');
+    cell.value = value instanceof Date
+      ? value
+      : typeof value === 'number' ? value : String(value ?? '');
+    if (value instanceof Date) cell.numFmt = 'dd/mm/yyyy';
     styleDataCell(cell, false);
   }
 

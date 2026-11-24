@@ -34,6 +34,7 @@ const HEADERS = [
   'MARQUILLA',
   'FOTO ANTES',
   'FOTO DESPUES',
+  'FECHA DE INSTALACION',
 ];
 
 test('serves camera data and registers a CCTV record through its dedicated API route', async () => {
@@ -67,6 +68,8 @@ test('serves camera data and registers a CCTV record through its dedicated API r
     formData.append('estadoInicial', 'Defectuoso');
     formData.append('estadoFinal', 'Operativo');
     formData.append('observacion', 'Inspección de prueba.');
+    formData.append('instalacionNueva', 'true');
+    formData.append('requestId', '123e4567-e89b-42d3-a456-426614174001');
     formData.append('checklistItems', JSON.stringify([
       'inspection-visual',
       'mount-support',
@@ -89,14 +92,46 @@ test('serves camera data and registers a CCTV record through its dedicated API r
     assert.equal(registration.inspectionSaved, true);
     assert.equal(registration.fila, 3);
 
+    const retryData = new FormData();
+    [
+      ['idDispositivo', '2-40-1'],
+      ['tecnico', 'TECNICO CCTV'],
+      ['estadoInicial', 'Defectuoso'],
+      ['estadoFinal', 'Operativo'],
+      ['observacion', 'Inspección de prueba.'],
+      ['instalacionNueva', 'true'],
+      ['requestId', '123e4567-e89b-42d3-a456-426614174001'],
+      ['checklistItems', JSON.stringify([
+        'inspection-visual',
+        'mount-support',
+        'camera-connections',
+        'lens-cleaning',
+        'housing-cleaning',
+        'focus',
+        'iris',
+        'sharpness',
+        'marquilla',
+      ])],
+    ].forEach(([name, value]) => retryData.append(name, value));
+    const retryResponse = await fetch(`${baseUrl}/registrar`, {
+      method: 'POST',
+      body: retryData,
+    });
+    const retryResult = await retryResponse.json();
+    assert.equal(retryResponse.status, 200);
+    assert.equal(retryResult.fila, registration.fila);
+
     const savedWorkbook = new ExcelJS.Workbook();
     await savedWorkbook.xlsx.readFile(process.env.CCTV_EXCEL_PATH);
     const savedRow = savedWorkbook.getWorksheet('Registro cctv').getRow(3);
+    assert.equal(savedWorkbook.getWorksheet('Registro cctv').rowCount, 3);
     assert.equal(savedRow.getCell(2).value, '2-40-1');
     assert.equal(savedRow.getCell(3).value.trim(), 'AMPLIACIoN');
     assert.equal(savedRow.getCell(7).value, 'Defectuoso');
     assert.equal(savedRow.getCell(13).value, 'Operativo');
     assert.equal(savedRow.getCell(20).value, 'SI');
+    assert.equal(savedRow.getCell(23).value.toISOString().slice(0, 10), savedRow.getCell(5).value);
+    assert.equal(savedRow.getCell(23).numFmt, 'dd/mm/yyyy');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(temporaryDirectory, { recursive: true, force: true });

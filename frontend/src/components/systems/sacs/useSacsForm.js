@@ -7,6 +7,7 @@ import {
   SACS_SHEETS,
 } from './sacsConstants';
 import { getSacsEndpoint, readSacsJsonResponse } from './sacsApi';
+import { enqueueReport } from '../../../services/reportOutbox';
 
 const normalizeSacsId = (id) => String(id ?? '').trim().toUpperCase();
 const getDeviceKey = (device) => String(device.ITEM);
@@ -139,42 +140,29 @@ export default function useSacsForm(technician) {
       setMessage({ type: 'error', text: 'Selecciona la matriz y un dispositivo de la base SACS antes de guardar.' });
       return;
     }
-
     savingRequestRef.current = true;
     setSaving(true);
     setMessage(null);
 
     try {
-      const dataToSend = new FormData();
-      dataToSend.append('hoja', formData.hoja);
-      dataToSend.append('idDispositivo', selectedDevice.ID);
-      dataToSend.append('itemDispositivo', String(selectedDevice.ITEM));
-      dataToSend.append('tecnico', technician);
-      dataToSend.append('general', formData.general);
-      dataToSend.append('observacion', formData.observacion);
-      dataToSend.append('checklistItems', JSON.stringify(checkedItems));
-      dataToSend.append('numericValues', JSON.stringify(formData.numericValues));
-      if (fotoAntes) dataToSend.append('fotoAntes', fotoAntes);
-      if (fotoDespues) dataToSend.append('fotoDespues', fotoDespues);
-
-      const response = await fetch(getSacsEndpoint('registrar'), {
-        method: 'POST',
-        headers: { 'ngrok-skip-browser-warning': 'true' },
-        body: dataToSend,
+      const queuedReport = await enqueueReport({
+        system: 'SACS',
+        fields: {
+          hoja: formData.hoja,
+          idDispositivo: selectedDevice.ID,
+          itemDispositivo: String(selectedDevice.ITEM),
+          tecnico: technician,
+          general: formData.general,
+          observacion: formData.observacion,
+          instalacionNueva: String(formData.instalacionNueva),
+          checklistItems: JSON.stringify(checkedItems),
+          numericValues: JSON.stringify(formData.numericValues),
+        },
+        photos: { fotoAntes, fotoDespues },
       });
-      const result = await readSacsJsonResponse(response);
-      if (!response.ok || result?.success !== true || result?.inspectionSaved !== true) {
-        throw new Error(result?.error || `Error HTTP ${response.status} al guardar el registro SACS.`);
-      }
-
-      const savedRow = Number(result.fila);
-      if (!Number.isInteger(savedRow) || savedRow < 1) {
-        throw new Error('El servidor no confirmó la fila escrita en el informe SACS.');
-      }
-
       setMessage({
         type: 'info',
-        text: `Registro SACS guardado en ${result.hoja}, fila ${savedRow} (ítem ${result.item}).`,
+        text: `Registro y fotos guardados en la cola local. Solicitud ${queuedReport.requestId}.`,
       });
       resetForm();
     } catch (error) {

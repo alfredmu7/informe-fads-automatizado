@@ -32,6 +32,7 @@ export const createInitialCctvFormData = () => ({
   estadoInicial: 'Operativo',
   estadoFinal: 'Operativo',
   observacion: '',
+  instalacionNueva: false,
 });
 
 export const createInitialCctvChecklist = () => CCTV_CHECKLIST_ITEMS

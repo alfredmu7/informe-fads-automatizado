@@ -4,6 +4,13 @@ const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
 const createReportWriteQueue = require('./report-write-queue');
+const { getOptionalInstallationDate } = require('./report-date');
+const {
+  findSavedRequest,
+  parseRequestId,
+  recordSavedRequest,
+  verifySavedRequest,
+} = require('./report-idempotency');
 const {
   buildSacsPhotoFilename,
   findSacsDeviceByIdAndItem,
@@ -85,6 +92,8 @@ router.get('/fotos/:filename', (req, res, next) => {
 router.post('/registrar', sacsUpload, async (req, res) => {
   const uploadedFiles = Object.values(req.files || {}).flat();
   let workbookSaved = false;
+  let requestId = '';
+  let deviceIdForLog = '';
 
   try {
     const {
@@ -94,7 +103,11 @@ router.post('/registrar', sacsUpload, async (req, res) => {
       tecnico,
       general,
       observacion,
+      instalacionNueva,
+      requestId: rawRequestId,
     } = req.body;
+    requestId = parseRequestId(rawRequestId);
+    deviceIdForLog = String(idDispositivo || '');
 
     if (!idDispositivo || !itemDispositivo) {
       const error = new Error('Selecciona un dispositivo de la base SACS.');
@@ -128,15 +141,18 @@ router.post('/registrar', sacsUpload, async (req, res) => {
       throw error;
     }
 
+    const registrationDate = new Date().toISOString().slice(0, 10);
+    const installationDate = getOptionalInstallationDate(instalacionNueva, registrationDate);
     const photoUrl = (file) => (file
       ? `${publicBackendUrl}/api/sacs/fotos/${encodeURIComponent(path.basename(file.path))}`
       : '');
     const registration = {
       sheetName: hoja,
       device,
-      date: new Date().toISOString().slice(0, 10),
+      date: registrationDate,
       technician: String(tecnico || ''),
       general: String(general || ''),
+      installationDate,
       observation: String(observacion || ''),
       selectedItems,
       numericValues,
@@ -146,7 +162,7 @@ router.post('/registrar', sacsUpload, async (req, res) => {
       },
     };
 
-    const { result } = await serializeSacsWrite(async () => {
+    const { result, responsePayload, duplicate } = await serializeSacsWrite(async () => {
       if (!fs.existsSync(sacsExcelPath)) {
         const error = new Error(`No se encontró el archivo de SACS en la ruta: ${sacsExcelPath}`);
         error.statusCode = 404;
@@ -160,6 +176,18 @@ router.post('/registrar', sacsUpload, async (req, res) => {
 
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.readFile(sacsExcelPath);
+      const previousRequest = findSavedRequest(workbook, requestId);
+      if (previousRequest) {
+        if (previousRequest.sheetName !== hoja || !verifySavedRequest(workbook, previousRequest)) {
+          const error = new Error(
+            'Este envío ya existe en el Excel SACS, pero no se pudo verificar su fila. No se creó otro registro.',
+          );
+          error.statusCode = 409;
+          throw error;
+        }
+        return { responsePayload: previousRequest.response, duplicate: true };
+      }
+
       const worksheet = workbook.getWorksheet(hoja);
       if (!worksheet) {
         const error = new Error(`La pestaña ${hoja} no existe en el archivo SACS.`);
@@ -168,6 +196,34 @@ router.post('/registrar', sacsUpload, async (req, res) => {
       }
 
       const result = await writeSacsReportRow(worksheet, registration);
+      const expectedValues = {
+        ...result.values,
+        photoBefore: registration.photoLinks.photoBefore,
+        photoAfter: registration.photoLinks.photoAfter,
+      };
+      const responsePayload = {
+        success: true,
+        inspectionSaved: true,
+        requestId,
+        hoja,
+        fila: result.row + 1,
+        item: result.item,
+        dispositivo: device.ID,
+        ubicacion: device.UBICACION || '',
+        fotos: {
+          antes: registration.photoLinks.photoBefore,
+          despues: registration.photoLinks.photoAfter,
+        },
+      };
+      recordSavedRequest(workbook, {
+        requestId,
+        sheetName: hoja,
+        rowNumber: result.row + 1,
+        columns: result.columns,
+        expectedValues,
+        response: responsePayload,
+      });
+
       await workbook.xlsx.writeFile(sacsExcelPath);
       workbookSaved = true;
 
@@ -175,39 +231,41 @@ router.post('/registrar', sacsUpload, async (req, res) => {
       await verificationWorkbook.xlsx.readFile(sacsExcelPath);
       const verificationWorksheet = verificationWorkbook.getWorksheet(hoja);
       const verificationRow = verificationWorksheet?.getRow(result.row + 1);
-      const expectedValues = {
-        ...result.values,
-        photoBefore: registration.photoLinks.photoBefore,
-        photoAfter: registration.photoLinks.photoAfter,
-      };
+      const savedRequest = findSavedRequest(verificationWorkbook, requestId);
       const mismatch = findSacsReportRowMismatch(verificationRow, result.columns, expectedValues);
-      if (mismatch) {
-        throw new Error(`El Excel SACS se escribió, pero no se pudo verificar el campo ${mismatch[0]}.`);
+      if (
+        mismatch
+        || (requestId && (!savedRequest || !verifySavedRequest(verificationWorkbook, savedRequest)))
+      ) {
+        throw new Error(
+          `El Excel SACS se escribió, pero no se pudo verificar el campo ${mismatch ? mismatch[0] : 'identificador de solicitud'}.`,
+        );
       }
-      return { result };
+      return { result, responsePayload, duplicate: false };
     });
 
-    console.log(`Registro SACS confirmado: ${hoja}, fila ${result.row + 1}, ítem ${result.item}.`);
-    res.json({
-      success: true,
-      inspectionSaved: true,
-      hoja,
-      fila: result.row + 1,
-      item: result.item,
-      dispositivo: device.ID,
-      ubicacion: device.UBICACION || '',
-      fotos: {
-        antes: registration.photoLinks.photoBefore,
-        despues: registration.photoLinks.photoAfter,
-      },
-    });
+    if (duplicate) removeUploadedFiles(uploadedFiles);
+    console.log(duplicate
+      ? `Reintento idempotente confirmado: ID ${device.ID}, archivo ${sacsExcelPath}, pestaña ${hoja}, fila ${responsePayload.fila}, solicitud ${requestId || 'legacy'}.`
+      : `Registro SACS confirmado: ID ${device.ID}, archivo ${sacsExcelPath}, pestaña ${hoja}, fila ${result.row + 1}, ítem ${result.item}, solicitud ${requestId || 'legacy'}.`);
+    res.json(responsePayload);
   } catch (error) {
     if (!workbookSaved) removeUploadedFiles(uploadedFiles);
     const responseError = normalizeSacsWriteError(error, workbookSaved);
     if (error.code === 'EBUSY' || error.code === 'EPERM') {
-      console.log('El archivo del informe SACS está bloqueado:', error.code);
+      console.log(
+        'El archivo del informe SACS está bloqueado:',
+        `ID ${deviceIdForLog || 'desconocido'}`,
+        sacsExcelPath,
+        error.code,
+        `solicitud ${requestId || 'legacy'}`,
+      );
     } else {
-      console.error('Error al procesar el registro SACS:', error);
+      console.error(
+        'Error al procesar el registro SACS:',
+        `ID ${deviceIdForLog || 'desconocido'}, solicitud ${requestId || 'legacy'}`,
+        error,
+      );
     }
     res.status(responseError.statusCode).json({ error: responseError.message });
   }

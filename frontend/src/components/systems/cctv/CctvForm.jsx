@@ -47,6 +47,7 @@ export default function CctvForm({ onBack, technician }) {
   const hasPendingChanges = Boolean(
     formData.idDispositivo
     || formData.observacion
+    || formData.instalacionNueva
     || formData.estadoInicial !== 'Operativo'
     || formData.estadoFinal !== 'Operativo'
     || checklistChanged

@@ -4,6 +4,13 @@ const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
 const createReportWriteQueue = require('./report-write-queue');
+const { getOptionalInstallationDate } = require('./report-date');
+const {
+  findSavedRequest,
+  parseRequestId,
+  recordSavedRequest,
+  verifySavedRequest,
+} = require('./report-idempotency');
 const {
   buildCctvPhotoFilename,
   findCctvCameraById,
@@ -89,7 +96,16 @@ router.post('/registrar', cctvUpload, async (req, res) => {
   let workbookSaved = false;
 
   try {
-    const { idDispositivo, tecnico, estadoInicial, estadoFinal, observacion } = req.body;
+    const {
+      idDispositivo,
+      tecnico,
+      estadoInicial,
+      estadoFinal,
+      observacion,
+      instalacionNueva,
+      requestId: rawRequestId,
+    } = req.body;
+    const requestId = parseRequestId(rawRequestId);
     if (!idDispositivo) {
       const error = new Error('El ID de la cámara es obligatorio.');
       error.statusCode = 400;
@@ -124,15 +140,18 @@ router.post('/registrar', cctvUpload, async (req, res) => {
 
     const beforePhoto = req.files?.fotoAntes?.[0] || null;
     const afterPhoto = req.files?.fotoDespues?.[0] || null;
+    const registrationDate = new Date().toISOString().slice(0, 10);
+    const installationDate = getOptionalInstallationDate(instalacionNueva, registrationDate);
     const photoUrl = (file) => (file
       ? `${publicBackendUrl}/api/cctv/fotos/${encodeURIComponent(path.basename(file.path))}`
       : '');
     const registration = {
       camera,
-      date: new Date().toISOString().slice(0, 10),
+      date: registrationDate,
       technician: String(tecnico || ''),
       initialState: String(estadoInicial || ''),
       finalState: String(estadoFinal || ''),
+      installationDate,
       observation: String(observacion || ''),
       selectedItems,
       photoLinks: {
@@ -141,7 +160,7 @@ router.post('/registrar', cctvUpload, async (req, res) => {
       },
     };
 
-    const { result } = await serializeCctvWrite(async () => {
+    const { result, responsePayload, duplicate } = await serializeCctvWrite(async () => {
       if (!fs.existsSync(cctvExcelPath)) {
         const error = new Error(`No se encontró el archivo de CCTV en la ruta: ${cctvExcelPath}`);
         error.statusCode = 404;
@@ -155,6 +174,21 @@ router.post('/registrar', cctvUpload, async (req, res) => {
 
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.readFile(cctvExcelPath);
+      const previousRequest = findSavedRequest(workbook, requestId);
+      if (previousRequest) {
+        if (
+          previousRequest.sheetName !== 'Registro cctv'
+          || !verifySavedRequest(workbook, previousRequest)
+        ) {
+          const error = new Error(
+            'Este envío ya existe en el Excel CCTV, pero no se pudo verificar su fila. No se creó otro registro.',
+          );
+          error.statusCode = 409;
+          throw error;
+        }
+        return { responsePayload: previousRequest.response, duplicate: true };
+      }
+
       const worksheet = workbook.getWorksheet('Registro cctv');
       if (!worksheet) {
         const error = new Error('La hoja Registro cctv no existe en el archivo.');
@@ -163,13 +197,6 @@ router.post('/registrar', cctvUpload, async (req, res) => {
       }
 
       const result = await writeCctvReportRow(worksheet, registration);
-      await workbook.xlsx.writeFile(cctvExcelPath);
-      workbookSaved = true;
-
-      const verificationWorkbook = new ExcelJS.Workbook();
-      await verificationWorkbook.xlsx.readFile(cctvExcelPath);
-      const verificationWorksheet = verificationWorkbook.getWorksheet('Registro cctv');
-      const verificationRow = verificationWorksheet?.getRow(result.row + 1);
       const expectedValues = {
         item: result.item,
         id: camera.ID,
@@ -184,26 +211,50 @@ router.post('/registrar', cctvUpload, async (req, res) => {
         photoBefore: registration.photoLinks.photoBefore,
         photoAfter: registration.photoLinks.photoAfter,
       };
+      const responsePayload = {
+        success: true,
+        inspectionSaved: true,
+        item: result.item,
+        fila: result.row + 1,
+        dispositivo: camera.ID,
+        fase: camera.FASE || '',
+        ubicacion: camera.UBICACION || '',
+        fotos: { antes: registration.photoLinks.photoBefore, despues: registration.photoLinks.photoAfter },
+      };
+      recordSavedRequest(workbook, {
+        requestId,
+        sheetName: 'Registro cctv',
+        rowNumber: result.row + 1,
+        columns: result.columns,
+        expectedValues,
+        response: responsePayload,
+      });
+
+      await workbook.xlsx.writeFile(cctvExcelPath);
+      workbookSaved = true;
+
+      const verificationWorkbook = new ExcelJS.Workbook();
+      await verificationWorkbook.xlsx.readFile(cctvExcelPath);
+      const verificationWorksheet = verificationWorkbook.getWorksheet('Registro cctv');
+      const verificationRow = verificationWorksheet?.getRow(result.row + 1);
+      const savedRequest = findSavedRequest(verificationWorkbook, requestId);
       const mismatch = findCctvReportRowMismatch(verificationRow, result.columns, expectedValues);
-      if (mismatch) {
-        throw new Error(`El Excel CCTV se escribió, pero no se pudo verificar el campo ${mismatch[0]}.`);
+      if (
+        mismatch
+        || (requestId && (!savedRequest || !verifySavedRequest(verificationWorkbook, savedRequest)))
+      ) {
+        throw new Error(
+          `El Excel CCTV se escribió, pero no se pudo verificar el campo ${mismatch ? mismatch[0] : 'identificador de solicitud'}.`,
+        );
       }
-      return { result };
+      return { result, responsePayload, duplicate: false };
     });
 
-    console.log(
-      `Registro CCTV confirmado: ${cctvExcelPath}, fila ${result.row + 1}, ítem ${result.item}.`,
-    );
-    res.json({
-      success: true,
-      inspectionSaved: true,
-      item: result.item,
-      fila: result.row + 1,
-      dispositivo: camera.ID,
-      fase: camera.FASE || '',
-      ubicacion: camera.UBICACION || '',
-      fotos: { antes: registration.photoLinks.photoBefore, despues: registration.photoLinks.photoAfter },
-    });
+    if (duplicate) removeUploadedFiles(uploadedFiles);
+    console.log(duplicate
+      ? `Reintento idempotente confirmado: ${cctvExcelPath}, fila ${responsePayload.fila}.`
+      : `Registro CCTV confirmado: ${cctvExcelPath}, fila ${result.row + 1}, ítem ${result.item}.`);
+    res.json(responsePayload);
   } catch (error) {
     if (!workbookSaved) removeUploadedFiles(uploadedFiles);
     const responseError = normalizeCctvWriteError(error, workbookSaved);

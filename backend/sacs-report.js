@@ -86,6 +86,7 @@ const COMMON_HEADER_ALIASES = {
   location: ['UBICACION'],
   date: ['FECHA'],
   technician: ['TECNICO RESPONSABLE'],
+  installationDate: ['FECHA DE INSTALACION'],
   general: ['GENERAL||SWINGATE||AMPLIACION'],
   photoBefore: ['FOTO ANTES'],
   photoAfter: ['FOTO DESPUES'],
@@ -192,6 +193,7 @@ function assertRequiredSacsColumns(columns, sheetName) {
     'location',
     'date',
     'technician',
+    'installationDate',
     'photoBefore',
     'photoAfter',
     'observation',
@@ -321,6 +323,7 @@ async function writeSacsReportRow(worksheet, registration) {
     location: registration.device.UBICACION ?? '',
     date: registration.date,
     technician: registration.technician,
+    installationDate: registration.installationDate,
     ...(config.general ? { general: registration.general } : {}),
     ...checklistValues,
     ...numericValues,
@@ -329,7 +332,11 @@ async function writeSacsReportRow(worksheet, registration) {
   const targetRow = worksheet.getRow(rowNumber);
   targetRow.height = 24;
   for (const [field, value] of Object.entries(values)) {
-    targetRow.getCell(columns[field]).value = typeof value === 'number' ? value : String(value ?? '');
+    const cell = targetRow.getCell(columns[field]);
+    cell.value = value instanceof Date
+      ? value
+      : typeof value === 'number' ? value : String(value ?? '');
+    if (value instanceof Date) cell.numFmt = 'dd/mm/yyyy';
   }
 
   for (const [field, text] of [

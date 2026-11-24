@@ -19,17 +19,20 @@ const SHEET_HEADERS = {
     'BOTON', 'LECTORA DE SALIDA', 'INTERCOM DE SALIDA', 'ELECTROÍMAN #1', 'ELECTROÍMAN #2',
     'TAMPER', 'TIMER', 'CONTROLADORA RDR', 'BATERIA #1', 'BATERIA #2', 'OBSERVACIONES',
     'MARQUILLA', 'FOTO ANTES', 'FOTO DESPUES',
+    'FECHA DE INSTALACION',
   ],
   Botones: [
     'ITEM', 'ID', 'UBICACION', 'FECHA', 'TECNICO RESPONSABLE', 'PEDAL', 'BOTON', 'ACRILICO',
     'ESTADO INICIAL', 'INSP. VISUAL', 'MONTAJE', 'CONEX.', 'ESTADO FINAL', 'OBSERVACIONES',
     'GRAFICO CCURE', 'REAL TIME', 'MARQUILLA', 'FOTO ANTES', 'FOTO DESPUES',
+    'FECHA DE INSTALACION',
   ],
   Citofonia: [
     'ITEM', 'ID', 'UBICACION', 'FECHA', 'TECNICO RESPONSABLE', 'GENERAL||SWINGATE||AMPLIACION',
     'ESTADO DE LEDS', 'CONEX. Y AJUSTES', 'MONTAJE EN RAC', 'NUM. RAC', 'LIMPIEZA',
     'VOLTAJE ALIMENT.', 'VERIFICACION LEDS', 'PUERTOS OCUPADOS', 'PUERTOS LIBRES',
     'CONEX. EQUIPO-SERVIDOR', 'ESTADO FINAL', 'MARQUILLA', 'OBSERVACIONES', 'FOTO ANTES', 'FOTO DESPUES',
+    'FECHA DE INSTALACION',
   ],
   CK: [
     'ITEM', 'ID', 'UBICACION', 'FECHA', 'TECNICO RESPONSABLE', 'ESTADO INICIAL', 'INSP. VISUAL',
@@ -37,6 +40,7 @@ const SHEET_HEADERS = {
     'ESTADO CCURE', 'VOLTAJE ALIMENT.  CONTROLADORES VDC', 'VOLTAJE 1 DEL BUS 485 VDC',
     'VOLTAJE 2 DEL BUS 485 VDC', 'VOLTAJE 3 DEL BUS  485 VDC', 'ANCLAJE GABINETE',
     'CONEX. BORNERAS', 'MARQUILLA', 'FOTO ANTES', 'FOTO DESPUES',
+    'FECHA DE INSTALACION',
   ],
 };
 
@@ -58,6 +62,7 @@ function createRequestData(sheetName, device, overrides = {}) {
   data.append('tecnico', 'TECNICO PRUEBA');
   data.append('general', SHEET_CONFIG[sheetName].general ? 'GENERAL' : '');
   data.append('observacion', 'Prueba SACS');
+  data.append('instalacionNueva', 'false');
   data.append(
     'checklistItems',
     JSON.stringify(SHEET_CONFIG[sheetName].checklist
@@ -91,7 +96,12 @@ test('serves SACS data and registers all four matrices through the dedicated rou
 
     const selectedDevice = devices.find((device) => device.ID === '1157-01');
     for (const sheetName of Object.keys(SHEET_HEADERS)) {
-      const requestData = createRequestData(sheetName, selectedDevice);
+      const requestData = createRequestData(sheetName, selectedDevice, sheetName === 'Puertas'
+        ? {
+          instalacionNueva: 'true',
+          requestId: '123e4567-e89b-42d3-a456-426614174002',
+        }
+        : {});
       if (sheetName === 'CK') {
         requestData.append(
           'fotoAntes',
@@ -108,7 +118,21 @@ test('serves SACS data and registers all four matrices through the dedicated rou
       assert.equal(result.success, true);
       assert.equal(result.hoja, sheetName);
       assert.equal(result.fila, 3);
+      if (sheetName === 'Puertas') {
+        assert.equal(result.requestId, '123e4567-e89b-42d3-a456-426614174002');
+      }
     }
+
+    const retriedDoorsResponse = await fetch(`${baseUrl}/registrar`, {
+      method: 'POST',
+      body: createRequestData('Puertas', selectedDevice, {
+        instalacionNueva: 'true',
+        requestId: '123e4567-e89b-42d3-a456-426614174002',
+      }),
+    });
+    const retriedDoors = await retriedDoorsResponse.json();
+    assert.equal(retriedDoorsResponse.status, 200);
+    assert.equal(retriedDoors.fila, 3);
 
     const duplicateDevice = devices.find(
       (device) => device.ID === '1099A-01' && device.ITEM === 132,
@@ -127,6 +151,9 @@ test('serves SACS data and registers all four matrices through the dedicated rou
     assert.equal(savedWorkbook.getWorksheet('Botones').getRow(3).getCell(8).value, 'NO');
     assert.equal(savedWorkbook.getWorksheet('Citofonia').getRow(3).getCell(12).value, 48);
     assert.equal(savedWorkbook.getWorksheet('CK').getRow(3).getCell(15).value, 27);
+    const doorRegistration = savedWorkbook.getWorksheet('Puertas').getRow(3);
+    assert.equal(doorRegistration.getCell(25).value.toISOString().slice(0, 10), doorRegistration.getCell(4).value);
+    assert.equal(savedWorkbook.getWorksheet('Botones').getRow(3).getCell(20).value, '');
     assert.match(savedWorkbook.getWorksheet('CK').getRow(3).getCell(22).value.hyperlink, /\/api\/sacs\/fotos\/antes_1157_01_/);
   } finally {
     await new Promise((resolve) => server.close(resolve));

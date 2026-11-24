@@ -1,8 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import CameraCapture from './components/CameraCapture';
+import NewInstallationCheckbox from './components/NewInstallationCheckbox';
 import TechnicianSetup from './components/TechnicianSetup';
 import CctvForm from './components/systems/CctvForm';
 import SacsForm from './components/systems/SacsForm';
+import TicketResolutionPlaceholder from './components/tickets/TicketResolutionPlaceholder';
+import ReportOutboxStatus from './components/ReportOutboxStatus';
+import useReportOutbox from './hooks/useReportOutbox';
+import { enqueueReport } from './services/reportOutbox';
 import {
   AlertCircle,
   ArrowLeft,
@@ -84,6 +89,7 @@ const createInitialFormData = () => ({
   tipoEquipo: '',
   otroTipo: '',
   observacion: '',
+  instalacionNueva: false,
 });
 
 const normalizeDeviceId = (id) => String(id ?? '')
@@ -93,18 +99,11 @@ const normalizeDeviceId = (id) => String(id ?? '')
 
 const isOtherDeviceType = (type) => String(type ?? '').trim().toUpperCase() === 'OTRO';
 
-const resolveRegisterUrl = () => {
-  const configured = String(import.meta.env.VITE_API_URL || '').trim();
-  if (!configured) return '/api/registrar';
-  return configured.endsWith('/api/registrar')
-    ? configured
-    : `${configured.replace(/\/+$/, '')}/api/registrar`;
-};
-
 export default function App() {
   const [formData, setFormData] = useState(createInitialFormData);
   const [tecnico, setTecnico] = useState('');
   const [selectedSystem, setSelectedSystem] = useState('');
+  const [selectedWorkType, setSelectedWorkType] = useState('');
   const [devicesDatabase, setDevicesDatabase] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
   const [databaseError, setDatabaseError] = useState('');
@@ -116,6 +115,7 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const savingRequestRef = useRef(false);
   const [mensaje, setMensaje] = useState(null);
+  const outbox = useReportOutbox();
 
   const devicesById = useMemo(() => {
     const index = new Map();
@@ -195,6 +195,12 @@ export default function App() {
     setMensaje(null);
   };
 
+  /** Stores whether the FADS device was newly installed. */
+  const setNewInstallation = (checked) => {
+    setFormData((previous) => ({ ...previous, instalacionNueva: checked }));
+    setMensaje(null);
+  };
+
   const selectDevice = (device) => {
     setFormData((previous) => ({
       ...previous,
@@ -215,6 +221,7 @@ export default function App() {
     setMensaje(null);
   };
 
+  /** Clears the active workflow after confirming that no FADS draft will be discarded. */
   const closeTechnicianSession = () => {
     if (saving) return;
     const hasPendingChanges = Boolean(
@@ -223,6 +230,7 @@ export default function App() {
       || formData.estado !== 'BUENO'
       || formData.tipoEquipo
       || formData.otroTipo
+      || formData.instalacionNueva
       || checkedItems.length
       || fotoAntes
       || fotoDespues
@@ -234,11 +242,14 @@ export default function App() {
     clearRegistration();
     setTecnico('');
     setSelectedSystem('');
+    setSelectedWorkType('');
   };
 
-  const handleConfirmAccess = (technicianName, system) => {
+  /** Stores the completed access choices and selects the maintenance or ticket flow. */
+  const handleConfirmAccess = (technicianName, system, workType) => {
     setTecnico(technicianName);
     setSelectedSystem(system);
+    setSelectedWorkType(workType);
   };
 
   const toggleChecklistItem = (itemId) => {
@@ -265,53 +276,27 @@ export default function App() {
     setMensaje(null);
 
     try {
-      const backendUrl = resolveRegisterUrl();
-      const dataToSend = new FormData();
-      dataToSend.append('idDispositivo', dispositivoEncontrado?.ID || formData.idDispositivo);
-      dataToSend.append('dTivo', formData.dTivo);
-      dataToSend.append('ubicacion', formData.ubicacion);
-      dataToSend.append('tecnologia', formData.tecnologia);
-      dataToSend.append('tipoHoja', 'DISPOSITIVOS');
-      dataToSend.append('tecnico', tecnico);
-      dataToSend.append('estado', formData.estado);
-      dataToSend.append('observacion', formData.observacion);
-      dataToSend.append('tipoEquipo', formData.tipoEquipo);
-      dataToSend.append('otroTipo', formData.otroTipo);
-      dataToSend.append('checklistItems', JSON.stringify(checkedItems));
-
-      if (fotoAntes) dataToSend.append('fotoAntes', fotoAntes);
-      if (fotoDespues) dataToSend.append('fotoDespues', fotoDespues);
-
-      const response = await fetch(backendUrl, {
-        method: 'POST',
-        headers: {
-          'ngrok-skip-browser-warning': 'true',
+      const queuedReport = await enqueueReport({
+        system: 'FADS',
+        fields: {
+          idDispositivo: dispositivoEncontrado?.ID || formData.idDispositivo,
+          dTivo: formData.dTivo,
+          ubicacion: formData.ubicacion,
+          tecnologia: formData.tecnologia,
+          tipoHoja: 'DISPOSITIVOS',
+          tecnico,
+          estado: formData.estado,
+          observacion: formData.observacion,
+          instalacionNueva: String(formData.instalacionNueva),
+          tipoEquipo: formData.tipoEquipo,
+          otroTipo: formData.otroTipo,
+          checklistItems: JSON.stringify(checkedItems),
         },
-        body: dataToSend,
+        photos: { fotoAntes, fotoDespues },
       });
-
-      const rawText = await response.text();
-      let result = null;
-      try {
-        result = rawText ? JSON.parse(rawText) : null;
-      } catch {
-        throw new Error(
-          `El servidor devolvió una respuesta no válida (HTTP ${response.status}). Verifica que VITE_API_URL apunte al túnel activo de ngrok y que el backend esté encendido.`
-        );
-      }
-
-      if (!response.ok || result?.success !== true || result?.inspectionSaved !== true) {
-        throw new Error(result?.error || `Error HTTP ${response.status} al guardar el registro.`);
-      }
-
-      const savedRow = Number(result.fila);
-      if (!Number.isInteger(savedRow) || savedRow < 1) {
-        throw new Error('El servidor no confirmó la fila escrita en el informe. El registro no se marcó como guardado.');
-      }
-
       setMensaje({
         type: 'info',
-        text: `Registro guardado en DISPOSITIVOS, fila ${savedRow} (ítem ${result.item}).`,
+        text: `Registro y fotos guardados en la cola local. Solicitud ${queuedReport.requestId}.`,
       });
       setFormData(createInitialFormData());
       setFotoAntes(null);
@@ -351,7 +336,9 @@ export default function App() {
             <div>
               <span className="brand-title">Johnson Controls</span>
               <span className="brand-caption">
-                {selectedSystem ? `Sistema ${selectedSystem}` : 'Acceso a sistemas de inspección'}
+                {selectedSystem
+                  ? `${selectedWorkType === 'ticket' ? 'Solución de ticket' : 'Mantenimiento'} · ${selectedSystem}`
+                  : 'Acceso a sistemas de inspección'}
               </span>
             </div>
           </div>
@@ -362,9 +349,10 @@ export default function App() {
         </header>
 
         <div className="app-body">
+          <ReportOutboxStatus outbox={outbox} />
           {tecnico ? (
             <>
-              {!['CCTV', 'SACS'].includes(selectedSystem) && (
+              {selectedWorkType === 'maintenance' && selectedSystem === 'FADS' && (
                 <div className="session-bar">
                   <span className="session-user">
                     <UserRound size={16} aria-hidden="true" />
@@ -383,7 +371,13 @@ export default function App() {
                 </div>
               )}
 
-              {selectedSystem === 'FADS' ? (
+              {selectedWorkType === 'ticket' ? (
+                <TicketResolutionPlaceholder
+                  technician={tecnico}
+                  system={selectedSystem}
+                  onBack={closeTechnicianSession}
+                />
+              ) : selectedSystem === 'FADS' ? (
                 <>
               <section className="intro">
                 <span className="eyebrow">REGISTRO DE MANTENIMIENTO</span>
@@ -656,6 +650,12 @@ export default function App() {
                         <p>Documenta los hallazgos de la inspección.</p>
                       </div>
                     </div>
+
+                    <NewInstallationCheckbox
+                      idPrefix="fads"
+                      checked={formData.instalacionNueva}
+                      onCheckedChange={setNewInstallation}
+                    />
 
                     <div className="field-group">
                       <label className="field-label" htmlFor="observacion">Observaciones</label>

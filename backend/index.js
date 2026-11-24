@@ -11,6 +11,13 @@ const {
   writeReportRow,
 } = require('./report');
 const createReportWriteQueue = require('./report-write-queue');
+const { getOptionalInstallationDate } = require('./report-date');
+const {
+  findSavedRequest,
+  parseRequestId,
+  recordSavedRequest,
+  verifySavedRequest,
+} = require('./report-idempotency');
 const cctvRouter = require('./cctv');
 const sacsRouter = require('./sacs');
 
@@ -132,8 +139,11 @@ app.post('/api/registrar', cpUpload, async (req, res) => {
       dTivo,
       ubicacion,
       tecnologia,
+      instalacionNueva,
+      requestId: rawRequestId,
       checklistItems: rawChecklistItems,
     } = req.body;
+    const requestId = parseRequestId(rawRequestId);
 
     if (!idDispositivo) {
       removeUploadedFiles(uploadedFiles);
@@ -162,7 +172,6 @@ app.post('/api/registrar', cpUpload, async (req, res) => {
     } catch {
       throw new Error('Datos de inspección inválidos: no se pudo leer la lista de casillas.');
     }
-
     req.files?.fotoAntes?.forEach((file) => ensurePhotoFilename(file, device.ID));
     req.files?.fotoDespues?.forEach((file) => ensurePhotoFilename(file, device.ID));
 
@@ -173,13 +182,14 @@ app.post('/api/registrar', cpUpload, async (req, res) => {
       ? `${PUBLIC_BACKEND_URL}/fotos/${encodeURIComponent(path.basename(file.path))}`
       : '');
     const registrationDate = new Date().toISOString().slice(0, 10);
+    const installationDate = getOptionalInstallationDate(instalacionNueva, registrationDate);
     const technician = tecnico || '';
     const state = estado || 'BUENO';
     const observation = observacion || '';
     const beforePhotoUrl = photoUrl(fotoAntesFile);
     const afterPhotoUrl = photoUrl(fotoDespuesFile);
 
-    const { result } = await serializeReportWrite(async () => {
+    const { result, responsePayload, duplicate } = await serializeReportWrite(async () => {
       if (!fs.existsSync(excelPath)) {
         const error = new Error(`No se encontró el archivo Excel en la ruta: ${excelPath}`);
         error.statusCode = 404;
@@ -196,6 +206,17 @@ app.post('/api/registrar', cpUpload, async (req, res) => {
 
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.readFile(excelPath);
+      const previousRequest = findSavedRequest(workbook, requestId);
+      if (previousRequest) {
+        if (previousRequest.sheetName !== sheetName || !verifySavedRequest(workbook, previousRequest)) {
+          const error = new Error(
+            'Este envío ya existe en el Excel, pero no se pudo verificar su fila. No se creó otro registro.',
+          );
+          error.statusCode = 409;
+          throw error;
+        }
+        return { responsePayload: previousRequest.response, duplicate: true };
+      }
 
       const worksheet = workbook.getWorksheet(sheetName);
       if (!worksheet) {
@@ -209,6 +230,7 @@ app.post('/api/registrar', cpUpload, async (req, res) => {
         date: registrationDate,
         technician,
         state,
+        installationDate,
         observation,
         inspection: {
           type: tipoEquipo,
@@ -221,13 +243,6 @@ app.post('/api/registrar', cpUpload, async (req, res) => {
         },
       });
 
-      await workbook.xlsx.writeFile(excelPath);
-      workbookSaved = true;
-
-      const verificationWorkbook = new ExcelJS.Workbook();
-      await verificationWorkbook.xlsx.readFile(excelPath);
-      const verificationWorksheet = verificationWorkbook.getWorksheet(sheetName);
-      const verificationRow = verificationWorksheet?.getRow(result.row + 1);
       const valuesToVerify = {
         item: result.item,
         id: device.ID,
@@ -238,40 +253,66 @@ app.post('/api/registrar', cpUpload, async (req, res) => {
         date: registrationDate,
         technician,
         state,
+        installationDate,
         observation,
         photoBefore: beforePhotoUrl,
         photoAfter: afterPhotoUrl,
         ...result.inspectionValues,
       };
+      const responsePayload = {
+        success: true,
+        inspectionSaved: true,
+        message: 'Dispositivo registrado con ubicación y tecnología consultadas en la base de datos.',
+        item: result.item,
+        fila: result.row + 1,
+        dispositivo: device.ID,
+        dTivo: device.DISPOSITIVO || '',
+        ubicacion: device.UBICACION || '',
+        tecnologia: device.TIPO || '',
+        fotos: { antes: beforePhotoUrl, despues: afterPhotoUrl },
+      };
+      recordSavedRequest(workbook, {
+        requestId,
+        sheetName,
+        rowNumber: result.row + 1,
+        columns: result.columns,
+        expectedValues: valuesToVerify,
+        response: responsePayload,
+      });
+
+      await workbook.xlsx.writeFile(excelPath);
+      workbookSaved = true;
+
+      const verificationWorkbook = new ExcelJS.Workbook();
+      await verificationWorkbook.xlsx.readFile(excelPath);
+      const verificationWorksheet = verificationWorkbook.getWorksheet(sheetName);
+      const verificationRow = verificationWorksheet?.getRow(result.row + 1);
+      const savedRequest = findSavedRequest(verificationWorkbook, requestId);
       const mismatch = findReportRowMismatch(
         verificationRow,
         result.columns,
         valuesToVerify,
       );
 
-      if (mismatch) {
-        throw new Error(`El archivo Excel se escribió, pero no se pudo verificar el campo ${mismatch[0]}.`);
+      if (
+        mismatch
+        || (requestId && (!savedRequest || !verifySavedRequest(verificationWorkbook, savedRequest)))
+      ) {
+        throw new Error(
+          `El archivo Excel se escribió, pero no se pudo verificar el campo ${mismatch ? mismatch[0] : 'identificador de solicitud'}.`,
+        );
       }
 
-      return { result };
+      return { result, responsePayload, duplicate: false };
     });
 
+    if (duplicate) removeUploadedFiles(uploadedFiles);
     console.log(
-      `Registro confirmado: ${excelPath}, ${sheetName}, fila ${result.row + 1}, ítem ${result.item}.`,
+      duplicate
+        ? `Reintento idempotente confirmado: ${excelPath}, ${sheetName}, fila ${responsePayload.fila}.`
+        : `Registro confirmado: ${excelPath}, ${sheetName}, fila ${result.row + 1}, ítem ${result.item}.`,
     );
-
-    res.json({
-      success: true,
-      inspectionSaved: true,
-      message: 'Dispositivo registrado con ubicación y tecnología consultadas en la base de datos.',
-      item: result.item,
-      fila: result.row + 1,
-      dispositivo: device.ID,
-      dTivo: device.DISPOSITIVO || '',
-      ubicacion: device.UBICACION || '',
-      tecnologia: device.TIPO || '',
-      fotos: { antes: beforePhotoUrl, despues: afterPhotoUrl },
-    });
+    res.json(responsePayload);
   } catch (error) {
     if (!workbookSaved) removeUploadedFiles(uploadedFiles);
     console.error('Error al procesar el registro:', error);

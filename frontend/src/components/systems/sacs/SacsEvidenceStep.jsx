@@ -1,6 +1,7 @@
 import React from 'react';
 import { CheckCircle2, ClipboardCheck } from 'lucide-react';
 import CameraCapture from '../../CameraCapture';
+import NewInstallationCheckbox from '../../NewInstallationCheckbox';
 
 function SacsPhotoCapture({ captureSession, label, onCapture, title }) {
   return (
@@ -33,6 +34,12 @@ export default function SacsEvidenceStep({
           <p>Documenta los hallazgos del mantenimiento SACS.</p>
         </div>
       </div>
+
+      <NewInstallationCheckbox
+        idPrefix="sacs"
+        checked={formData.instalacionNueva}
+        onCheckedChange={(checked) => updateField('instalacionNueva', checked)}
+      />
 
       <div className="field-group">
         <label className="field-label" htmlFor="sacs-observation">Observaciones</label>

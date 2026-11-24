@@ -108,6 +108,7 @@ export function getDefaultSacsNumericValues(sheetName) {
 export const createInitialSacsFormData = () => ({
   hoja: '',
   idDispositivo: '',
+  instalacionNueva: false,
   general: '',
   observacion: '',
   numericValues: {},

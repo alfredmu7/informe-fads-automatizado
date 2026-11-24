@@ -21,17 +21,20 @@ const SHEET_HEADERS = {
     'BOTON', 'LECTORA DE SALIDA', 'INTERCOM DE SALIDA', 'ELECTROÍMAN #1', 'ELECTROÍMAN #2',
     'TAMPER', 'TIMER', 'CONTROLADORA RDR', 'BATERIA #1', 'BATERIA #2', 'OBSERVACIONES',
     'MARQUILLA', 'FOTO ANTES', 'FOTO DESPUES',
+    'FECHA DE INSTALACION',
   ],
   Botones: [
     'ITEM', 'ID', 'UBICACION', 'FECHA', 'TECNICO RESPONSABLE', 'PEDAL', 'BOTON', 'ACRILICO',
     'ESTADO INICIAL', 'INSP. VISUAL', 'MONTAJE', 'CONEX.', 'ESTADO FINAL', 'OBSERVACIONES',
     'GRAFICO CCURE', 'REAL TIME', 'MARQUILLA', 'FOTO ANTES', 'FOTO DESPUES',
+    'FECHA DE INSTALACION',
   ],
   Citofonia: [
     'ITEM', 'ID', 'UBICACION', 'FECHA', 'TECNICO RESPONSABLE', 'GENERAL||SWINGATE||AMPLIACION',
     'ESTADO DE LEDS', 'CONEX. Y AJUSTES', 'MONTAJE EN RAC', 'NUM. RAC', 'LIMPIEZA',
     'VOLTAJE ALIMENT.', 'VERIFICACION LEDS', 'PUERTOS OCUPADOS', 'PUERTOS LIBRES',
     'CONEX. EQUIPO-SERVIDOR', 'ESTADO FINAL', 'MARQUILLA', 'OBSERVACIONES', 'FOTO ANTES', 'FOTO DESPUES',
+    'FECHA DE INSTALACION',
   ],
   CK: [
     'ITEM', 'ID', 'UBICACION', 'FECHA', 'TECNICO RESPONSABLE', 'ESTADO INICIAL', 'INSP. VISUAL',
@@ -39,6 +42,7 @@ const SHEET_HEADERS = {
     'ESTADO CCURE', 'VOLTAJE ALIMENT.  CONTROLADORES VDC', 'VOLTAJE 1 DEL BUS 485 VDC',
     'VOLTAJE 2 DEL BUS 485 VDC', 'VOLTAJE 3 DEL BUS  485 VDC', 'ANCLAJE GABINETE',
     'CONEX. BORNERAS', 'MARQUILLA', 'FOTO ANTES', 'FOTO DESPUES',
+    'FECHA DE INSTALACION',
   ],
 };
 
@@ -97,6 +101,17 @@ test('writes SACS checklist, database metadata, and sheet-specific values to all
       assert.equal(row.getCell(columns[numericField.field]).value, numericField.defaultValue, `${sheetName}: ${numericField.id}`);
     }
   }
+});
+
+test('writes SACS installation dates to the selected matrix as Excel dates', async () => {
+  const { worksheet } = createReportWorksheet('CK');
+  const result = await writeSacsReportRow(worksheet, createRegistration('CK', {
+    installationDate: new Date('2026-11-23T00:00:00.000Z'),
+  }));
+  const cell = worksheet.getRow(3).getCell(result.columns.installationDate);
+
+  assert.equal(cell.value.toISOString(), '2026-11-23T00:00:00.000Z');
+  assert.equal(cell.numFmt, 'dd/mm/yyyy');
 });
 
 test('maps duplicate SACS IDs to a selected database row and its corresponding location', () => {

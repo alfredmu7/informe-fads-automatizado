@@ -1,6 +1,7 @@
 import React from 'react';
 import { CheckCircle2, ClipboardCheck } from 'lucide-react';
 import CameraCapture from '../../CameraCapture';
+import NewInstallationCheckbox from '../../NewInstallationCheckbox';
 
 function PhotoCapture({ captureSession, label, onCapture, title }) {
   const photoKey = label === 'antes' ? `cctv-before-${captureSession}` : `cctv-after-${captureSession}`;
@@ -34,6 +35,12 @@ export default function CctvEvidenceStep({
           <p>Documenta los hallazgos de la cámara inspeccionada.</p>
         </div>
       </div>
+
+      <NewInstallationCheckbox
+        idPrefix="cctv"
+        checked={formData.instalacionNueva}
+        onCheckedChange={(checked) => updateField('instalacionNueva', checked)}
+      />
 
       <div className="field-group">
         <label className="field-label" htmlFor="cctv-observation">Observaciones</label>

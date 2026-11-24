@@ -12,6 +12,7 @@ const HEADER_ALIASES = {
   lensCleaning: ['LIMPIEZA LENTE'],
   housingCleaning: ['HOUSING LIMPIEZA AJUSTE'],
   finalState: ['ESTADO FINAL'],
+  installationDate: ['FECHA DE INSTALACION'],
   doubleHeight: ['DOBLE ALTURA'],
   observation: ['OBSERVACIONES', 'OBSERVACION'],
   focus: ['FOCO'],
@@ -222,6 +223,7 @@ async function writeCctvReportRow(worksheet, registration) {
     technician: registration.technician,
     initialState,
     finalState,
+    installationDate: registration.installationDate,
     observation: registration.observation,
     ...checklistValues,
   };
@@ -229,7 +231,11 @@ async function writeCctvReportRow(worksheet, registration) {
   const targetRow = worksheet.getRow(rowNumber);
   targetRow.height = 24;
   for (const [field, value] of Object.entries(values)) {
-    targetRow.getCell(columns[field]).value = typeof value === 'number' ? value : String(value ?? '');
+    const cell = targetRow.getCell(columns[field]);
+    cell.value = value instanceof Date
+      ? value
+      : typeof value === 'number' ? value : String(value ?? '');
+    if (value instanceof Date) cell.numFmt = 'dd/mm/yyyy';
   }
 
   for (const [field, text] of [

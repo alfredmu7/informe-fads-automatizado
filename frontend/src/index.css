@@ -345,6 +345,78 @@ button {
   color: #247760;
 }
 
+.outbox-banner {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.outbox-quiet {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 1px 2px;
+  color: #78889a;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.outbox-quiet svg {
+  flex: 0 0 auto;
+  color: #41a080;
+}
+
+.outbox-quiet span {
+  overflow-wrap: anywhere;
+}
+
+.outbox-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.outbox-copy span {
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+
+.outbox-copy small {
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.outbox-pending-list {
+  display: flex;
+  max-height: 100px;
+  flex-direction: column;
+  gap: 3px;
+  overflow: auto;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.outbox-pending-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 10px;
+}
+
+.outbox-pending-list li span {
+  font-weight: 500;
+}
+
+.outbox-sync-button {
+  min-width: 0;
+  min-height: 36px;
+  flex: 0 0 auto;
+  padding: 0 11px;
+}
+
 .form-stack {
   display: flex;
   flex-direction: column;
@@ -1248,6 +1320,15 @@ select.form-input {
   .brand-logo {
     width: 35px;
     height: 35px;
+  }
+
+  .outbox-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .outbox-sync-button {
+    width: 100%;
   }
 
   .app-body {

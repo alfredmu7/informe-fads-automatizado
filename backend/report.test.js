@@ -35,6 +35,7 @@ const HEADERS = [
   'TAPA BUEN ESTADO',
   'CARCASA BUEN ESTADO',
   'EQUIPO BUEN ESTADO',
+  'FECHA DE INSTALACION',
 ];
 
 function createReportSheet() {
@@ -214,6 +215,17 @@ test('writes existing report data and selected checklist values under their matc
   assert.equal(row.getCell(16).value, 'NO');
   assert.equal(row.getCell(17).value, 'SI');
   assert.equal(row.getCell(20).value, '');
+});
+
+test('writes installation dates as Excel dates with a date-only display format', async () => {
+  const { worksheet } = createReportSheet();
+  await writeReportRow(worksheet, createRegistration({
+    installationDate: new Date('2026-11-18T00:00:00.000Z'),
+  }));
+  const cell = worksheet.getRow(3).getCell(21);
+
+  assert.equal(cell.value.toISOString(), '2026-11-18T00:00:00.000Z');
+  assert.equal(cell.numFmt, 'dd/mm/yyyy');
 });
 
 test('rejects duplicate device IDs already present in the report', async () => {

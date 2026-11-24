@@ -33,6 +33,7 @@ const HEADERS = [
   'MARQUILLA',
   'FOTO ANTES',
   'FOTO DESPUES',
+  'FECHA DE INSTALACION',
 ];
 
 const DEFAULT_CHECKLIST = [
@@ -124,6 +125,17 @@ test('maps camera database fields and inspection values to the CCTV sheet header
   assert.equal(row.getCell(19).value, 'NO');
   assert.equal(row.getCell(20).value, 'SI');
   assert.equal(row.getCell(21).value.hyperlink, 'https://backend.example/api/cctv/fotos/antes_2_40_1_1.jpg');
+});
+
+test('writes a new installation date as an Excel date', async () => {
+  const { worksheet } = createCctvWorksheet();
+  await writeCctvReportRow(worksheet, createRegistration({
+    installationDate: new Date('2026-11-21T00:00:00.000Z'),
+  }));
+  const cell = worksheet.getRow(3).getCell(23);
+
+  assert.equal(cell.value.toISOString(), '2026-11-21T00:00:00.000Z');
+  assert.equal(cell.numFmt, 'dd/mm/yyyy');
 });
 
 test('allows repeated maintenance inspections for the same CCTV camera', async () => {

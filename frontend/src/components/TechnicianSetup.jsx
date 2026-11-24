@@ -1,94 +1,67 @@
 import React, { useState } from 'react';
-import { ArrowRight, Cctv, ClipboardCheck, ShieldCheck, UserRound } from 'lucide-react';
+import { ArrowRight, UserRound } from 'lucide-react';
+import SystemPicker from './access/SystemPicker';
+import WorkTypeSelector from './access/WorkTypeSelector';
 
-const SYSTEMS = [
-  {
-    id: 'FADS',
-    name: 'FADS',
-    description: 'Inspección de dispositivos',
-    icon: ClipboardCheck,
-  },
-  {
-    id: 'CCTV',
-    name: 'CCTV',
-    description: 'Videovigilancia',
-    icon: Cctv,
-  },
-  {
-    id: 'SACS',
-    name: 'SACS',
-    description: 'Sistema de alarma y control',
-    icon: ShieldCheck,
-  },
-];
-
+/** Collects the work type, technician, and system before opening a workflow. */
 export default function TechnicianSetup({ onConfirm }) {
   const [name, setName] = useState('');
   const [system, setSystem] = useState('');
+  const [workType, setWorkType] = useState('');
 
+  /** Resets the system choice when the workflow changes, then opens that workflow. */
+  const handleWorkTypeChange = (nextWorkType) => {
+    setWorkType(nextWorkType);
+    setSystem('');
+  };
+
+  /** Confirms access only after the work type, technician, and system are selected. */
   const handleSubmit = (event) => {
     event.preventDefault();
     const technicianName = name.trim().toUpperCase();
-    if (technicianName && system) onConfirm(technicianName, system);
+    if (technicianName && system && workType) onConfirm(technicianName, system, workType);
   };
 
   return (
     <section>
-      <div className="section-header">
-        <h2>Identificación del técnico</h2>
-        <p>Ingresa tu nombre y elige el sistema al que quieres ingresar.</p>
-      </div>
-
       <form className="form-stack" onSubmit={handleSubmit}>
-        <div className="field-group">
-          <label className="field-label" htmlFor="technicianName">Técnico responsable</label>
-          <input
-            id="technicianName"
-            type="text"
-            value={name}
-            onChange={(event) => setName(event.target.value.toLowerCase())}
-            placeholder="Nombre del técnico"
-            autoComplete="name"
-            autoFocus
-            required
-            className="form-input uppercase-input"
-          />
-        </div>
+        <WorkTypeSelector value={workType} onChange={handleWorkTypeChange} />
 
-        <fieldset className="system-picker">
-          <legend className="field-label">Sistema</legend>
-          <div className="system-options">
-            {SYSTEMS.map(({ id, name: systemName, description, icon: Icon }) => (
-              <label
-                className={`system-option${system === id ? ' is-selected' : ''}`}
-                htmlFor={`system-${id}`}
-                key={id}
-              >
-                <input
-                  id={`system-${id}`}
-                  type="radio"
-                  name="system"
-                  value={id}
-                  checked={system === id}
-                  onChange={() => setSystem(id)}
-                  required
-                />
-                <span className="system-option-icon"><Icon size={19} aria-hidden="true" /></span>
-                <span className="system-option-copy">
-                  <strong>{systemName}</strong>
-                  <small>{description}</small>
-                </span>
-                <span className="system-option-indicator" aria-hidden="true" />
-              </label>
-            ))}
-          </div>
-        </fieldset>
+        {workType && (
+          <>
+            <div className="section-header">
+              <h2>Identificación del técnico</h2>
+              <p>
+                {workType === 'maintenance'
+                  ? 'Ingresa tu nombre y elige el sistema que vas a mantener.'
+                  : 'Ingresa tu nombre y elige el sistema relacionado con el ticket.'}
+              </p>
+            </div>
 
-        <button type="submit" disabled={!name.trim() || !system} className="btn-primary">
-          <UserRound size={16} />
-          <span>Continuar</span>
-          <ArrowRight size={16} />
-        </button>
+            <div className="field-group">
+              <label className="field-label" htmlFor="technicianName">Técnico responsable</label>
+              <input
+                id="technicianName"
+                type="text"
+                value={name}
+                onChange={(event) => setName(event.target.value.toLowerCase())}
+                placeholder="Nombre del técnico"
+                autoComplete="name"
+                autoFocus
+                required
+                className="form-input uppercase-input"
+              />
+            </div>
+
+            <SystemPicker value={system} onChange={setSystem} />
+
+            <button type="submit" disabled={!name.trim() || !system || !workType} className="btn-primary">
+              <UserRound size={16} />
+              <span>Continuar</span>
+              <ArrowRight size={16} />
+            </button>
+          </>
+        )}
       </form>
     </section>
   );
