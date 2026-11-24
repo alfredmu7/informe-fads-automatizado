@@ -1,0 +1,23 @@
+.sacs-device-suggestion {
+  display: grid;
+  grid-template-columns: minmax(84px, auto) minmax(0, 1fr);
+  gap: 3px 10px;
+}
+
+.sacs-device-suggestion small {
+  grid-column: 1 / -1;
+  color: #8293a5;
+  font-size: 9px;
+}
+
+.sacs-numeric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 480px) {
+  .sacs-numeric-grid {
+    grid-template-columns: 1fr;
+  }
+}

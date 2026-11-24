@@ -12,6 +12,7 @@ const {
 } = require('./report');
 const createReportWriteQueue = require('./report-write-queue');
 const cctvRouter = require('./cctv');
+const sacsRouter = require('./sacs');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 5050;
@@ -28,6 +29,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use('/api/cctv', cctvRouter);
+app.use('/api/sacs', sacsRouter);
 
 // Carpeta de destino directamente en OneDrive para almacenar las evidencias fotográficas
 const onedriveImagesDir = 'C:/Users/jmunozav/Johnson Controls/Giovanni Parra - Mantenimiento Sistemas/FADS/Informe_automatizado/fotos_fads';

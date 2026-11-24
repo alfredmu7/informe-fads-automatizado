@@ -33,7 +33,7 @@ export default function CctvIdentificationStep({
         <label className="field-label field-label-row" htmlFor="cctv-id">
           <span>ID de la cámara</span>
           <span className={`database-status${databaseError ? ' is-error' : ''}`}>
-            {loadingData ? 'Cargando base…' : databaseError ? 'Base no disponible' : `Base CCTV · ${totalCameras} IDs`}
+            {loadingData ? 'Cargando base…' : databaseError ? 'Base no disponible' : `BD CCTV · Sincronizada 🟢`}
           </span>
         </label>
         <div className="input-with-icon">

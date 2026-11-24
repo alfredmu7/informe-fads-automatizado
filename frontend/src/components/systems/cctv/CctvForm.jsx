@@ -158,20 +158,21 @@ export default function CctvForm({ onBack, technician }) {
         )}
 
         <div className="form-navigation">
-          {currentStep > 0
-            ? (
-              <button type="button" className="btn-secondary" onClick={handlePrevious} disabled={saving}>
-                <ArrowLeft size={17} aria-hidden="true" />
-                <span>Anterior</span>
-              </button>
-            )
-            : (
-              <button type="button" className="btn-secondary" onClick={leaveCctvForm} disabled={saving}>
-                <ArrowLeft size={17} aria-hidden="true" />
-                <span>Volver a sistemas</span>
-              </button>
-            )}
-
+          <div className="form-navigation">
+              {currentStep > 0 ? (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={handlePrevious}
+                  disabled={saving}
+                >
+                  <ArrowLeft size={17} aria-hidden="true" />
+                  <span>Anterior</span>
+                </button>
+              ) : (
+                <span className="navigation-spacer" />
+              )}
+            </div>
           {currentStep < CCTV_STEPS.length - 1
             ? (
               <button

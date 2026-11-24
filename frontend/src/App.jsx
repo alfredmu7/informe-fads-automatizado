@@ -364,7 +364,7 @@ export default function App() {
         <div className="app-body">
           {tecnico ? (
             <>
-              {selectedSystem !== 'CCTV' && (
+              {!['CCTV', 'SACS'].includes(selectedSystem) && (
                 <div className="session-bar">
                   <span className="session-user">
                     <UserRound size={16} aria-hidden="true" />
@@ -448,7 +448,7 @@ export default function App() {
                       <label className="field-label field-label-row" htmlFor="idDispositivo">
                         <span>ID del dispositivo</span>
                         <span className={`database-status ${databaseError ? 'is-error' : ''}`}>
-                          {loadingData ? 'Cargando base de datos…' : databaseError ? 'Base de datos no disponible' : `Base de datos · ${devicesById.size} IDs`}
+                          {loadingData ? 'Cargando base de datos…' : databaseError ? 'Base de datos no disponible' : `BD Fads · Sincronizada 🟢`}
                         </span>
                       </label>
                       <div className="input-with-icon">
@@ -748,7 +748,7 @@ export default function App() {
               ) : selectedSystem === 'CCTV' ? (
                 <CctvForm onBack={closeTechnicianSession} technician={tecnico} />
               ) : (
-                <SacsForm onBack={closeTechnicianSession} />
+                <SacsForm onBack={closeTechnicianSession} technician={tecnico} />
               )}
             </>
           ) : (

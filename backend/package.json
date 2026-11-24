@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "node --test report.test.js cctv-report.test.js cctv-route.test.js"
+    "test": "node --test report.test.js cctv-report.test.js cctv-route.test.js sacs-report.test.js sacs-route.test.js"
   },
   "keywords": [],
   "author": "",
